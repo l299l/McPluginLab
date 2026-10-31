@@ -37,7 +37,7 @@ class Daemon(home: Path = MplHome.path, cache: Path = MplHome.cache) {
 
         server = runCatching { startServer(port) }.getOrElse { startServer(0) }
         val boundPort = runBlocking { server.engine.resolvedConnectors().first().port }
-        val info = DaemonInfo(boundPort, token, ProcessHandle.current().pid(), VERSION)
+        val info = DaemonInfo(boundPort, token, ProcessHandle.current().pid(), VERSION, System.getProperty("mpl.build").orEmpty())
         workspace.root.resolve("daemon.json").writeText(MplJson.encodeToString(DaemonInfo.serializer(), info))
 
         Runtime.getRuntime().addShutdownHook(Thread { shutdown() })

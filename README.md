@@ -10,7 +10,7 @@ A background daemon owns all processes; the CLI, GUI and MCP server are clients 
 alias mpl=$PWD/cli/build/install/mpl/bin/mpl
 ```
 
-Run `mpl shutdown` before rebuilding, so the daemon does not keep using replaced jars.
+The daemon runs from a copy of the jars, so rebuilding is safe; `mpl shutdown` restarts it on the new build.
 
 ## Usage
 

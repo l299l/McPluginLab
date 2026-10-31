@@ -106,7 +106,7 @@ data class CreateInstanceRequest(
 @Serializable data class Ok(val ok: Boolean = true, val message: String? = null)
 
 @Serializable
-data class DaemonInfo(val port: Int, val token: String, val pid: Long, val version: String)
+data class DaemonInfo(val port: Int, val token: String, val pid: Long, val version: String, val build: String = "")
 
 @Serializable
 data class TerminalSize(val cols: Int, val rows: Int)

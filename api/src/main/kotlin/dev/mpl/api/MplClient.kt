@@ -75,7 +75,8 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
     suspend fun remove(id: InstanceId, deleteFiles: Boolean): Ok =
         http.delete(path(id)) { auth(); parameter("deleteFiles", deleteFiles) }.parse()
 
-    suspend fun action(id: InstanceId, action: String): InstanceInfo = http.post("${path(id)}/$action") { auth() }.parse()
+    suspend fun action(id: InstanceId, action: String, wait: Boolean = true): InstanceInfo =
+        http.post("${path(id)}/$action") { auth(); parameter("wait", wait) }.parse()
 
     suspend fun command(id: InstanceId, command: String): Ok = http.post("${path(id)}/command") {
         auth(); contentType(ContentType.Application.Json); setBody(CommandRequest(command))
@@ -100,6 +101,8 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
 
     suspend fun events(block: suspend DefaultClientWebSocketSession.() -> Unit) =
         http.webSocket("ws://$address/api/events?token=${info.token}", block = block)
+
+    val isOutdated: Boolean get() = info.build != DaemonConnection.build
 
     override fun close() = http.close()
 

@@ -38,6 +38,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
 
     init {
         scope.launch { watchEvents() }
+        if (client.isOutdated) scope.launch { snackbar.showSnackbar("The daemon runs an older build; restart it to use this one.") }
     }
 
     fun open(project: String) {
@@ -47,7 +48,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
 
     fun console(id: InstanceId): ConsoleTerminal = consoles.getOrPut(id) { ConsoleTerminal(client, id) }
 
-    fun action(id: InstanceId, action: String) = launchFor(id.toString()) { client.action(id, action) }
+    fun action(id: InstanceId, action: String) = launchFor(id.toString()) { client.action(id, action, wait = false) }
 
     fun openInTerminal(id: InstanceId) = launchFor(id.toString()) { DaemonConnection.openInTerminal(id) }
 

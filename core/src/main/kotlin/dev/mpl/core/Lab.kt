@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
@@ -141,6 +142,20 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     suspend fun stop(id: InstanceId): InstanceInfo {
         get(id).process.stop()
+        return info(id)
+    }
+
+    fun requestStop(id: InstanceId): InstanceInfo {
+        get(id).process.requestStop()
+        return info(id)
+    }
+
+    fun requestRestart(id: InstanceId): InstanceInfo {
+        val process = get(id).process
+        process.requestStop()
+        scope.launch {
+            runCatching { restart(id) }.onFailure { process.log.append("[mpl] restart failed: ${it.message}") }
+        }
         return info(id)
     }
 

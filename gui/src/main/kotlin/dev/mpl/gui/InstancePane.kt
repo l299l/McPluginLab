@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.mpl.api.InstanceInfo
+import dev.mpl.api.InstanceState
 
 @Composable
 fun InstancePane(state: AppState, info: InstanceInfo) {
@@ -60,7 +61,6 @@ fun InstancePane(state: AppState, info: InstanceInfo) {
 private fun Header(state: AppState, info: InstanceInfo, onRemove: () -> Unit) {
     val id = info.def.id
     val busy = state.isBusy(id)
-    val alive = info.state.isAlive
 
     Row(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 20.dp, vertical = 14.dp),
@@ -85,13 +85,20 @@ private fun Header(state: AppState, info: InstanceInfo, onRemove: () -> Unit) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (alive) {
-                OutlinedButton(onClick = { state.action(id, "restart") }, enabled = !busy) { Text("Restart") }
-                OutlinedButton(onClick = { state.action(id, "kill") }, enabled = !busy) { Text("Kill") }
-                Button(onClick = { state.action(id, "stop") }, enabled = !busy) { Text("Stop") }
-            } else {
-                TextButton(onClick = onRemove, enabled = !busy) { Text("Remove") }
-                Button(onClick = { state.action(id, "start") }, enabled = !busy) { Text("Start") }
+            when (info.state) {
+                InstanceState.STARTING, InstanceState.RUNNING -> {
+                    OutlinedButton(onClick = { state.action(id, "restart") }) { Text("Restart") }
+                    OutlinedButton(onClick = { state.action(id, "kill") }) { Text("Kill") }
+                    Button(onClick = { state.action(id, "stop") }) { Text("Stop") }
+                }
+                InstanceState.STOPPING -> {
+                    OutlinedButton(onClick = { state.action(id, "kill") }) { Text("Kill") }
+                    Button(onClick = {}, enabled = false) { Text("Stopping…") }
+                }
+                InstanceState.STOPPED, InstanceState.CRASHED -> {
+                    TextButton(onClick = onRemove, enabled = !busy) { Text("Remove") }
+                    Button(onClick = { state.action(id, "start") }, enabled = !busy) { Text("Start") }
+                }
             }
             OutlinedButton(onClick = { state.openInTerminal(id) }) { Text("Pop out") }
         }

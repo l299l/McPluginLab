@@ -89,7 +89,7 @@ class ManagedProcess(
                 while (true) {
                     val n = input.read(buf)
                     if (n < 0) break
-                    output.append(withoutTerminalQueries(buf.copyOf(n)))
+                    output.append(TerminalQueries.strip(buf.copyOf(n)))
                     splitter.feed(buf, n)
                 }
             }
@@ -113,11 +113,6 @@ class ManagedProcess(
         }.also { coroutineContext.cancelChildren() }
     }
 
-    private fun withoutTerminalQueries(bytes: ByteArray): ByteArray {
-        val text = String(bytes, Charsets.ISO_8859_1)
-        return if (TERMINAL_QUERY.containsMatchIn(text)) TERMINAL_QUERY.replace(text, "").toByteArray(Charsets.ISO_8859_1) else bytes
-    }
-
     fun write(bytes: ByteArray) {
         val out = process?.takeIf { it.isAlive }?.outputStream ?: return
         synchronized(out) {
@@ -137,9 +132,25 @@ class ManagedProcess(
     }
 
     suspend fun stop(timeoutMs: Long = 60_000) {
-        val pty = process?.takeIf { it.isAlive } ?: return
-        _state.value = InstanceState.STOPPING
-        spec?.let { write("${it.stopCommand}\r".toByteArray()) }
+        val pty = beginStop() ?: return
+        awaitStop(pty, timeoutMs)
+    }
+
+    fun requestStop(timeoutMs: Long = 60_000) {
+        val pty = beginStop() ?: return
+        scope.launch { awaitStop(pty, timeoutMs) }
+    }
+
+    private fun beginStop(): PtyProcess? {
+        val pty = process?.takeIf { it.isAlive } ?: return null
+        if (_state.value != InstanceState.STOPPING) {
+            _state.value = InstanceState.STOPPING
+            spec?.let { write("${it.stopCommand}\r".toByteArray()) }
+        }
+        return pty
+    }
+
+    private suspend fun awaitStop(pty: PtyProcess, timeoutMs: Long) {
         if (withTimeoutOrNull(timeoutMs) { pty.onExit().await() } != null) return
         pty.destroy()
         if (withTimeoutOrNull(5_000) { pty.onExit().await() } != null) return
@@ -152,9 +163,5 @@ class ManagedProcess(
         _state.value = InstanceState.STOPPING
         pty.destroyForcibly()
         pty.onExit().await()
-    }
-
-    private companion object {
-        val TERMINAL_QUERY = Regex("\u001B\\[[>=]?0?c|\u001B\\[[56]n")
     }
 }

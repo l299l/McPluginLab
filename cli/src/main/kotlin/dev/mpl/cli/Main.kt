@@ -24,6 +24,7 @@ import dev.mpl.api.MplException
 import dev.mpl.daemon.Daemon
 import dev.mpl.gui.runGui
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 abstract class ClientCommand(name: String, private val help: String) : CliktCommand(name) {
@@ -31,12 +32,19 @@ abstract class ClientCommand(name: String, private val help: String) : CliktComm
 
     override fun help(context: Context) = help
 
-    final override fun run() = runBlocking { DaemonConnection.connect().use { execute(it) } }
+    final override fun run() = runBlocking {
+        DaemonConnection.connect().use { client ->
+            if (client.isOutdated && this@ClientCommand !is Shutdown) echo(OUTDATED_WARNING, err = true)
+            execute(client)
+        }
+    }
 
     abstract suspend fun execute(client: MplClient)
 
     protected fun ref(value: String) = InstanceId.parse(value, project)
 }
+
+const val OUTDATED_WARNING = "The daemon runs an older build of McPluginLab; run 'mpl shutdown' to restart it with this one."
 
 class Mpl : CliktCommand("mpl") {
     override fun help(context: Context) = "McPluginLab: run and test Minecraft servers, proxies and plugins"
@@ -52,7 +60,10 @@ class DaemonCommand : CliktCommand("daemon") {
 }
 
 class Shutdown : ClientCommand("shutdown", "Stop all instances and the daemon") {
-    override suspend fun execute(client: MplClient) = echo(client.shutdown().message)
+    override suspend fun execute(client: MplClient) {
+        echo(client.shutdown().message)
+        ProcessHandle.of(client.info.pid).ifPresent { it.onExit().get(2, TimeUnit.MINUTES) }
+    }
 }
 
 class Gui : ClientCommand("gui", "Open the McPluginLab window") {

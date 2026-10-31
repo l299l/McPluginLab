@@ -104,8 +104,8 @@ private fun Route.instanceRoutes(lab: Lab) {
         call.respond(Ok())
     }
     post("/start") { call.respond(lab.start(call.instanceId)) }
-    post("/stop") { call.respond(lab.stop(call.instanceId)) }
-    post("/restart") { call.respond(lab.restart(call.instanceId)) }
+    post("/stop") { call.respond(if (call.waits) lab.stop(call.instanceId) else lab.requestStop(call.instanceId)) }
+    post("/restart") { call.respond(if (call.waits) lab.restart(call.instanceId) else lab.requestRestart(call.instanceId)) }
     post("/kill") { call.respond(lab.kill(call.instanceId)) }
     post("/command") {
         lab.sendCommand(call.instanceId, call.receive<CommandRequest>().command)
@@ -148,6 +148,9 @@ private fun Route.instanceRoutes(lab: Lab) {
         }
     }
 }
+
+private val ApplicationCall.waits: Boolean
+    get() = request.queryParameters["wait"]?.toBoolean() ?: true
 
 private val ApplicationCall.instanceId: InstanceId
     get() = InstanceId(parameters["project"]!!, parameters["name"]!!)
