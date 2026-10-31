@@ -89,7 +89,7 @@ class ManagedProcess(
                 while (true) {
                     val n = input.read(buf)
                     if (n < 0) break
-                    output.append(buf.copyOf(n))
+                    output.append(withoutTerminalQueries(buf.copyOf(n)))
                     splitter.feed(buf, n)
                 }
             }
@@ -111,6 +111,11 @@ class ManagedProcess(
             match.onAwait { it }
             exit.onAwait { log.read(since, Int.MAX_VALUE).firstOrNull { regex.containsMatchIn(it.text) } }
         }.also { coroutineContext.cancelChildren() }
+    }
+
+    private fun withoutTerminalQueries(bytes: ByteArray): ByteArray {
+        val text = String(bytes, Charsets.ISO_8859_1)
+        return if (TERMINAL_QUERY.containsMatchIn(text)) TERMINAL_QUERY.replace(text, "").toByteArray(Charsets.ISO_8859_1) else bytes
     }
 
     fun write(bytes: ByteArray) {
@@ -147,5 +152,9 @@ class ManagedProcess(
         _state.value = InstanceState.STOPPING
         pty.destroyForcibly()
         pty.onExit().await()
+    }
+
+    private companion object {
+        val TERMINAL_QUERY = Regex("\u001B\\[[>=]?0?c|\u001B\\[[56]n")
     }
 }

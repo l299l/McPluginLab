@@ -6,6 +6,7 @@ plugins {
 
 dependencies {
     implementation(project(":daemon"))
+    implementation(project(":gui"))
     implementation(libs.clikt)
     runtimeOnly(libs.slf4j.simple)
 }

@@ -25,6 +25,7 @@ mpl attach lobby          # Ctrl+] detaches
 mpl open lobby            # console in a new terminal window (MPL_TERMINAL, default konsole)
 mpl stop lobby proxy
 mpl ls
+mpl gui                   # window with all consoles
 ```
 
 Existing server directories can be imported with `--dir <path> --jar <file>`.

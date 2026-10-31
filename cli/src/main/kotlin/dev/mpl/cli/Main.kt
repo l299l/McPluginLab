@@ -15,18 +15,20 @@ import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import dev.mpl.api.CreateInstanceRequest
+import dev.mpl.api.DaemonConnection
 import dev.mpl.api.InstanceInfo
 import dev.mpl.api.InstanceType
 import dev.mpl.api.MplClient
 import dev.mpl.api.MplException
 import dev.mpl.daemon.Daemon
+import dev.mpl.gui.runGui
 import kotlinx.coroutines.runBlocking
 import kotlin.system.exitProcess
 
 abstract class ClientCommand(name: String, private val help: String) : CliktCommand(name) {
     override fun help(context: Context) = help
 
-    final override fun run() = Connection.client().use { client -> runBlocking { execute(client) } }
+    final override fun run() = runBlocking { DaemonConnection.connect().use { execute(it) } }
 
     abstract suspend fun execute(client: MplClient)
 }
@@ -104,7 +106,7 @@ open class ActionCommand(private val action: String, help: String) : ClientComma
             val info = client.action(name, action)
             if (wait && action in setOf("start", "restart")) {
                 val result = client.waitFor(name, info.def.effectiveReadyPattern, since, timeout * 1000)
-                if (!result.matched) throw CliError("$name did not become ready (state ${client.instance(name).state})")
+                if (!result.matched) throw MplException("$name did not become ready (state ${client.instance(name).state})")
             }
             echo(client.instance(name).describe())
         }
@@ -160,16 +162,18 @@ class Attach : ClientCommand("attach", "Attach this terminal to an instance cons
     override suspend fun execute(client: MplClient) = attach(client, name)
 }
 
-class Open : CliktCommand("open") {
-    override fun help(context: Context) = "Open an instance console in a new terminal window"
+class Open : ClientCommand("open", "Open an instance console in a new terminal window") {
     private val name by argument()
     private val terminal by option("--terminal", envvar = "MPL_TERMINAL").default("konsole")
 
-    override fun run() {
-        Connection.client().use { runBlocking { it.instance(name) } }
-        val command = listOf(terminal, "-e") + Connection.selfCommand("attach", name)
-        ProcessBuilder(listOf("setsid") + command).start()
+    override suspend fun execute(client: MplClient) {
+        client.instance(name)
+        DaemonConnection.openInTerminal(name, terminal)
     }
+}
+
+class Gui : ClientCommand("gui", "Open the McPluginLab window") {
+    override suspend fun execute(client: MplClient) = runGui(client)
 }
 
 private fun InstanceInfo.describe() =
@@ -179,11 +183,8 @@ fun main(args: Array<String>) {
     try {
         Mpl().subcommands(
             DaemonCommand(), Shutdown(), ListInstances(), Versions(), Create(), Remove(),
-            Start(), Stop(), Restart(), Kill(), Send(), Logs(), Wait(), Attach(), Open(),
+            Start(), Stop(), Restart(), Kill(), Send(), Logs(), Wait(), Attach(), Open(), Gui(),
         ).main(args)
-    } catch (e: CliError) {
-        System.err.println(e.message)
-        exitProcess(1)
     } catch (e: MplException) {
         System.err.println(e.message)
         exitProcess(1)
