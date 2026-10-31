@@ -135,6 +135,8 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
 
     suspend fun versions(project: String): VersionList = http.get("/api/versions/$project") { auth() }.parse()
 
+    suspend fun javaInstallations(): List<String> = http.get("/api/java") { auth() }.parse()
+
     suspend fun shutdown(): Ok = http.post("/api/shutdown") { auth() }.parse()
 
     suspend fun attach(id: InstanceId, block: suspend DefaultClientWebSocketSession.() -> Unit) =

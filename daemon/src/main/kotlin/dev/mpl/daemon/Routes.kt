@@ -75,6 +75,8 @@ fun Application.module(daemon: Daemon) {
                 call.respond(VersionList(project, withContext(Dispatchers.IO) { daemon.lab.versions(project) }))
             }
 
+            get("/java") { call.respond(withContext(Dispatchers.IO) { daemon.lab.javaInstallations() }) }
+
             webSocket("/events") {
                 daemon.lab.events.collect { send(Frame.Text(MplJson.encodeToString(Event.serializer(), it))) }
             }

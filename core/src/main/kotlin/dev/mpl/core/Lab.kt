@@ -14,7 +14,15 @@ import dev.mpl.api.PluginStatus
 import dev.mpl.api.ProjectInfo
 import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.core.bots.SoulFire
-import dev.mpl.core.download.FillClient
+import dev.mpl.core.download.BungeeCordSource
+import dev.mpl.core.download.Downloader
+import dev.mpl.core.download.FillSource
+import dev.mpl.core.download.PurpurSource
+import dev.mpl.core.download.ServerSource
+import dev.mpl.core.download.SpigotSource
+import dev.mpl.core.java.JavaRequirements
+import dev.mpl.core.java.JdkManager
+import dev.mpl.core.launcher.MinecraftLauncher
 import dev.mpl.core.files.InstanceFiles
 import dev.mpl.core.network.NetworkConfigurator
 import dev.mpl.core.plugins.PluginService
@@ -48,8 +56,16 @@ import kotlin.io.path.writeText
 class NotFoundException(message: String) : RuntimeException(message)
 
 class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
-    private val fill = FillClient(workspace.jarCache)
+    private val downloader = Downloader()
+    private val jdks = JdkManager(workspace.jdkDir, downloader)
     private val soulFire = SoulFire(workspace.jarCache, workspace.soulFireRuntime)
+    private val launcher = MinecraftLauncher(workspace.minecraftDir, downloader)
+    private val sources: Map<String, ServerSource> = buildMap {
+        listOf("paper", "folia", "velocity", "waterfall").forEach { put(it, FillSource(it, downloader, workspace.jarCache)) }
+        put("purpur", PurpurSource(downloader, workspace.jarCache))
+        put("bungeecord", BungeeCordSource(downloader, workspace.jarCache))
+        put("spigot", SpigotSource(downloader, workspace.jarCache, jdks))
+    }
     private val projects = ConcurrentHashMap<String, ProjectDef>()
     private val instances = ConcurrentHashMap<InstanceId, Instance>()
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 256)
@@ -153,7 +169,13 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     fun get(id: InstanceId): Instance = instances[id] ?: throw NotFoundException("No instance '$id'")
 
-    fun versions(software: String): List<String> = if (software == "soulfire") soulFire.versions() else fill.versions(software)
+    fun versions(software: String): List<String> = when (software) {
+        "soulfire" -> soulFire.versions()
+        "minecraft" -> launcher.releases()
+        else -> source(software).versions()
+    }
+
+    fun javaInstallations() = jdks.installed().sortedBy { it.feature }.map { "${it.feature}: ${it.home}" }
 
     suspend fun create(req: CreateInstanceRequest): InstanceInfo = withContext(Dispatchers.IO) {
         val id = InstanceId(req.project, req.name)
@@ -168,25 +190,32 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             name = req.name,
             type = req.type,
             dir = dir.toString(),
-            port = if (req.type == InstanceType.SOULFIRE) null else req.port ?: nextFreePort(req.type),
+            port = if (req.type.isServer || req.type.isProxy) req.port ?: nextFreePort(req.type) else null,
             memory = req.memory ?: if (req.type.isProxy) "512M" else "2G",
-            java = req.java ?: "java",
+            java = req.java ?: InstanceDef.AUTO_JAVA,
         )
         val existingJar = req.jar
         def = if (req.type == InstanceType.SOULFIRE) {
             val bots = requireNotNull(req.bots) { "Bot instances need bot settings (target, count)" }
             require(instances.containsKey(InstanceId(req.project, bots.target))) { "No instance '${bots.target}' in ${req.project} to connect bots to" }
             val jar = existingJar?.let { dir.resolve(it) }?.also { require(it.exists()) { "Jar $it not found" } } ?: soulFire.download(req.version)
-            def.copy(jar = jar.toString(), version = req.version ?: jar.fileName.toString().removePrefix("SoulFireCLI-").removeSuffix(".jar"), bots = bots)
+            val version = req.version ?: jar.fileName.toString().removePrefix("SoulFireCLI-").removeSuffix(".jar")
+            def.copy(jar = jar.toString(), version = version, bots = bots, javaVersion = JavaRequirements.forInstance(req.type, version))
+        } else if (req.type == InstanceType.CLIENT) {
+            val client = requireNotNull(req.client) { "Client instances need a username" }
+            require(USERNAME.matches(client.username)) { "Invalid Minecraft username '${client.username}'" }
+            client.target?.let { require(instances.containsKey(InstanceId(req.project, it))) { "No instance '$it' in ${req.project} to join" } }
+            val version = launcher.prepare(req.version ?: launcher.latestRelease()) { println("[$id] $it") }
+            def.copy(jar = "", version = version.id, client = client, javaVersion = version.javaVersion?.majorVersion ?: 8)
         } else if (existingJar != null) {
             require(dir.resolve(existingJar).exists()) { "Jar $existingJar not found in $dir" }
-            def.copy(jar = existingJar, version = req.version.orEmpty())
+            val version = req.version.orEmpty()
+            def.copy(jar = existingJar, version = version, javaVersion = version.takeIf { it.isNotBlank() }?.let { JavaRequirements.forInstance(req.type, it) })
         } else {
-            val fillProject = req.type.fillProject ?: throw IllegalArgumentException("Type ${req.type} needs an existing jar")
-            val version = req.version ?: fill.latestStableVersion(fillProject)
-            val jar = fill.download(fillProject, version, req.build)
+            val software = req.type.software ?: throw IllegalArgumentException("Type ${req.type} needs an existing jar")
+            val jar = source(software).download(req.version, req.build) { println("[$id] $it") }
             jar.path.copyTo(dir.resolve(def.jar), overwrite = true)
-            def.copy(version = jar.version, build = jar.build)
+            def.copy(version = jar.version, build = jar.build, javaVersion = jar.javaVersion ?: JavaRequirements.forInstance(req.type, jar.version))
         }
 
         if (req.type.isServer) {
@@ -204,12 +233,22 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
         info(id)
     }
 
-    fun start(id: InstanceId): InstanceInfo {
+    suspend fun start(id: InstanceId): InstanceInfo = withContext(Dispatchers.IO) {
         val instance = get(id)
+        check(!instance.process.isAlive) { "$id is already running" }
         syncNetwork(id.project, reloadProxy = false)
-        instance.process.start(launchSpec(instance.def))
-        return instance.info()
+        val java = javaFor(instance.def)
+        instance.process.start(launchSpec(instance.def, java))
+        instance.info()
     }
+
+    private fun javaFor(def: InstanceDef): String {
+        if (def.java != InstanceDef.AUTO_JAVA) return def.java
+        val feature = def.javaVersion ?: JavaRequirements.forInstance(def.type, def.version)
+        return jdks.resolve(feature) { note(def.id, it) }.java.toString()
+    }
+
+    private fun source(software: String) = sources[software] ?: throw IllegalArgumentException("Unknown server software '$software'")
 
     suspend fun stop(id: InstanceId): InstanceInfo {
         get(id).process.stop()
@@ -279,12 +318,13 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             .launchIn(scope)
     }
 
-    private fun launchSpec(def: InstanceDef): LaunchSpec {
+    private fun launchSpec(def: InstanceDef, java: String): LaunchSpec {
         val dir = Path(def.dir)
-        if (def.type == InstanceType.SOULFIRE) return botLaunchSpec(def)
+        if (def.type == InstanceType.SOULFIRE) return botLaunchSpec(def, java)
+        if (def.type == InstanceType.CLIENT) return clientLaunchSpec(def, java)
         val portArgs = def.port?.let { port ->
             when (def.type) {
-                InstanceType.PAPER, InstanceType.FOLIA -> {
+                InstanceType.PAPER, InstanceType.FOLIA, InstanceType.PURPUR, InstanceType.SPIGOT -> {
                     PropertiesFile.update(dir.resolve("server.properties"), mapOf("server-port" to port.toString()))
                     emptyList()
                 }
@@ -294,19 +334,19 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
         }.orEmpty()
 
         val command = buildList {
-            add(def.java)
+            add(java)
             add("-Xmx${def.memory}")
             addAll(def.jvmArgs)
             add("-jar")
             add(def.jar)
-            if (def.type == InstanceType.PAPER || def.type == InstanceType.FOLIA) add("--nogui")
+            if (def.type.isServer) add("--nogui")
             addAll(portArgs)
             addAll(def.args)
         }
         return LaunchSpec(command, dir, def.env, def.effectiveStopCommand, Regex(def.effectiveReadyPattern))
     }
 
-    private fun botLaunchSpec(def: InstanceDef): LaunchSpec {
+    private fun botLaunchSpec(def: InstanceDef, java: String): LaunchSpec {
         val bots = requireNotNull(def.bots) { "${def.id} has no bot settings" }
         val target = get(InstanceId(def.project, bots.target)).def
         val port = requireNotNull(target.port) { "${target.id} has no port" }
@@ -314,7 +354,15 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             ?: target.version.takeIf { target.type.isServer }
             ?: instanceDefs(def.project).firstOrNull { it.type.isServer }?.version
             ?: throw IllegalArgumentException("Set a protocol version for ${def.id}")
-        val command = soulFire.command(def, bots, "127.0.0.1:$port", version)
+        val command = soulFire.command(def, java, bots, "127.0.0.1:$port", version)
+        return LaunchSpec(command, Path(def.dir), def.env, def.effectiveStopCommand, Regex(def.effectiveReadyPattern))
+    }
+
+    private fun clientLaunchSpec(def: InstanceDef, java: String): LaunchSpec {
+        val client = requireNotNull(def.client) { "${def.id} has no client settings" }
+        val version = launcher.prepare(def.version) { note(def.id, it) }
+        val server = client.target?.let { target -> get(InstanceId(def.project, target)).def.port?.let { "127.0.0.1" to it } }
+        val command = launcher.command(version, java, Path(def.dir), client.username, server, def.memory)
         return LaunchSpec(command, Path(def.dir), def.env, def.effectiveStopCommand, Regex(def.effectiveReadyPattern))
     }
 
@@ -332,5 +380,6 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     private companion object {
         val NAME = Regex("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$")
+        val USERNAME = Regex("^[A-Za-z0-9_]{3,16}$")
     }
 }

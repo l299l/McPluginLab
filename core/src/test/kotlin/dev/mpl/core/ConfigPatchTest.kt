@@ -44,4 +44,11 @@ class ConfigPatchTest {
         val patched = TomlPatch.replaceSection(TomlPatch.setTopLevel(toml, "bind", "\"0.0.0.0:25577\""), "servers", listOf("a = \"127.0.0.1:2\"", "try = [\"a\"]"))
         assertEquals("bind = \"0.0.0.0:25577\"\n\n[servers]\na = \"127.0.0.1:2\"\ntry = [\"a\"]\n\n[advanced]\nx = 1", patched)
     }
+
+    @Test
+    fun replacesTopLevelYamlBlockIncludingListItems() {
+        val config = "servers:\n  old:\n    address: x\nlisteners:\n- host: 0.0.0.0:25577\n  priorities:\n  - old\nip_forward: false"
+        val patched = YamlPatch.replaceTopLevel(config, "listeners", listOf("- host: 0.0.0.0:1"))
+        assertEquals("servers:\n  old:\n    address: x\nlisteners:\n- host: 0.0.0.0:1\nip_forward: false", patched)
+    }
 }

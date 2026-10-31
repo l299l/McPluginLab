@@ -145,7 +145,7 @@ class ManagedProcess(
         val pty = process?.takeIf { it.isAlive } ?: return null
         if (_state.value != InstanceState.STOPPING) {
             _state.value = InstanceState.STOPPING
-            spec?.let { write("${it.stopCommand}\r".toByteArray()) }
+            spec?.stopCommand?.takeIf { it.isNotBlank() }?.let { write("$it\r".toByteArray()) } ?: pty.destroy()
         }
         return pty
     }

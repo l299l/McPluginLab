@@ -18,6 +18,8 @@ class Workspace(home: Path, cache: Path) {
     val root: Path = home.toAbsolutePath().normalize()
     val jarCache: Path = cache.toAbsolutePath().normalize().resolve("jars")
     val soulFireRuntime: Path = cache.toAbsolutePath().normalize().resolve("soulfire")
+    val jdkDir: Path = cache.toAbsolutePath().normalize().resolve("jdks")
+    val minecraftDir: Path = cache.toAbsolutePath().normalize().resolve("minecraft")
     private val projectsDir: Path = root.resolve("projects")
     private val serversDir: Path = root.resolve("servers")
     private val logsDir: Path = root.resolve("logs")

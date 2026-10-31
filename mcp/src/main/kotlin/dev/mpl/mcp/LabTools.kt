@@ -1,6 +1,7 @@
 package dev.mpl.mcp
 
 import dev.mpl.api.BotSettings
+import dev.mpl.api.ClientSettings
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.InstanceId
 import dev.mpl.api.InstanceInfo
@@ -22,22 +23,25 @@ class LabTools(private val client: MplClient) {
             client.instances(args.optString("project")).joinToString("\n") { it.describe() }.ifEmpty { "No instances." }
         },
 
-        tool("create_instance", "Create a server (paper/folia), proxy (velocity/waterfall) or SoulFire bot instance (soulfire). Downloads the jar.", {
+        tool("create_instance", "Create a server (paper/folia/purpur/spigot), proxy (velocity/waterfall/bungeecord), SoulFire bots (soulfire) or a Minecraft client (client). Downloads what is needed.", {
             string("instance", "project/name")
-            string("type", "paper, folia, velocity, waterfall or soulfire")
+            string("type", "paper, folia, purpur, spigot, velocity, waterfall, bungeecord, soulfire or client")
             string("version", "Minecraft/proxy/SoulFire version, default latest stable", required = false)
             integer("port", "Port, default next free")
-            string("bot_target", "soulfire: instance name in the project to connect to (proxy or server)", required = false)
+            string("bot_target", "soulfire/client: instance name in the project to connect to (proxy or server)", required = false)
+            string("username", "client: offline player name (default: instance name)", required = false)
             integer("bot_count", "soulfire: number of bots (default 1)")
             string("bot_prefix", "soulfire: bot name prefix (default Bot)", required = false)
             string("jar", "Existing jar path instead of downloading", required = false)
         }) { args ->
             val id = args.instance()
             val type = InstanceType.valueOf(args.string("type").uppercase())
-            val bots = args.optString("bot_target")?.let { BotSettings(it, args.optInt("bot_count") ?: 1, args.optString("bot_prefix") ?: "Bot") }
+            val target = args.optString("bot_target")
+            val bots = target?.takeIf { type == InstanceType.SOULFIRE }?.let { BotSettings(it, args.optInt("bot_count") ?: 1, args.optString("bot_prefix") ?: "Bot") }
+            val player = if (type == InstanceType.CLIENT) ClientSettings(args.optString("username") ?: id.name, target) else null
             val request = CreateInstanceRequest(
                 project = id.project, name = id.name, type = type, version = args.optString("version"),
-                port = args.optInt("port"), jar = args.optString("jar"), offlineMode = true, bots = bots,
+                port = args.optInt("port"), jar = args.optString("jar"), offlineMode = true, bots = bots, client = player,
             )
             "Created " + client.create(request).describe()
         },
@@ -45,12 +49,16 @@ class LabTools(private val client: MplClient) {
         tool("start", "Start an instance. With wait_ready (default true) returns once it is ready (servers: 'Done', bots: accounts loaded).", {
             string("instance", "project/name")
             boolean("wait_ready", "Wait until ready (default true)")
+            string("expect", "Also wait for a log line matching this regex, e.g. 'Bot1 joined the game'", required = false)
+            string("expect_in", "project/name whose log to watch for expect (default: the instance)", required = false)
             integer("timeout_seconds", "Default 180")
         }) { args -> lifecycle(args, "start") },
 
         tool("restart", "Restart an instance, optionally waiting until ready.", {
             string("instance", "project/name")
             boolean("wait_ready", "Wait until ready (default true)")
+            string("expect", "Also wait for a log line matching this regex, e.g. 'Bot1 joined the game'", required = false)
+            string("expect_in", "project/name whose log to watch for expect (default: the instance)", required = false)
             integer("timeout_seconds", "Default 180")
         }) { args -> lifecycle(args, "restart") },
 
@@ -139,13 +147,20 @@ class LabTools(private val client: MplClient) {
 
     private suspend fun lifecycle(args: Args, action: String): String {
         val id = args.instance()
+        val watched = args.optString("expect_in")?.let { InstanceId.parse(it, id.project) } ?: id
+        val timeoutMs = (args.optLong("timeout_seconds") ?: 180) * 1000
         val since = client.instance(id).nextLogSeq
+        val expectSince = client.instance(watched).nextLogSeq
         val info = client.action(id, action)
-        if (!args.bool("wait_ready", true)) return info.describe()
-        val result = client.waitFor(id, info.def.effectiveReadyPattern, since, (args.optLong("timeout_seconds") ?: 180) * 1000)
+        val expect = args.optString("expect")
+        if (!args.bool("wait_ready", true) && expect == null) return info.describe()
+        val ready = client.waitFor(id, info.def.effectiveReadyPattern, since, timeoutMs)
         val current = client.instance(id)
-        if (!result.matched) throw IllegalStateException("$id did not become ready: ${current.describe()}\n" + tail(id, since))
-        return current.describe()
+        if (!ready.matched) throw IllegalStateException("$id did not become ready: ${current.describe()}\n" + tail(id, since))
+        expect ?: return current.describe()
+        val result = client.waitFor(watched, expect, expectSince, timeoutMs)
+        if (!result.matched) throw IllegalStateException("$id is ready but no line matching '$expect' appeared in $watched\n" + tail(watched, expectSince))
+        return "${current.describe()}\n${result.line!!.text}\n[cursor ${result.next} in $watched]"
     }
 
     private suspend fun sendAndExpect(args: Args, line: String): String {
@@ -172,6 +187,7 @@ class LabTools(private val client: MplClient) {
         append("${def.id}: ${def.type.name.lowercase()} ${def.version}, ${state.name.lowercase()}")
         def.port?.let { append(", port $it") }
         def.bots?.let { append(", bots ${it.accountNames.joinToString()} -> ${it.target}") }
+        def.client?.let { append(", player ${it.username}" + (it.target?.let { target -> " -> $target" } ?: "")) }
         append(", log cursor $nextLogSeq")
     }
 

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import dev.mpl.api.BotSettings
+import dev.mpl.api.ClientSettings
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.MplHome
@@ -84,17 +85,20 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
     var count by remember { mutableStateOf("2") }
     var prefix by remember { mutableStateOf("Bot") }
     var jar by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("Player") }
     val scope = rememberCoroutineScope()
     val bots = type == InstanceType.SOULFIRE
+    val client = type == InstanceType.CLIENT
 
     LaunchedEffect(type) {
-        versions = state.versions(type.fillProject ?: "soulfire")
+        versions = state.versions(type.software!!)
         version = versions.firstOrNull { v -> v.none(Char::isLetter) } ?: versions.firstOrNull().orEmpty()
     }
 
     val creating = submitted && state.isBusy(name)
     val canCreate = name.isNotBlank() && !creating && when {
         bots -> target.isNotBlank() && (count.toIntOrNull() ?: 0) > 0 && (version.isNotBlank() || jar.isNotBlank())
+        client -> version.isNotBlank() && Regex("[A-Za-z0-9_]{3,16}").matches(username)
         else -> version.isNotBlank() && (type.isProxy || acceptEula)
     }
 
@@ -105,7 +109,12 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
                 FilterChip(selected = type == it, onClick = { type = it }, label = { Text(it.name.lowercase()) })
             }
         }
-        if (bots) {
+        if (client) {
+            VersionField(version, versions, onChange = { version = it })
+            OutlinedTextField(username, { username = it.trim() }, label = { Text("Player name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            ChoiceField("Join", target.ifBlank { NO_TARGET }, listOf(NO_TARGET) + targets.map { it.name }, onChange = { target = if (it == NO_TARGET) "" else it })
+            OutlinedTextField(memory, { memory = it.trim() }, label = { Text("Memory (2G)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        } else if (bots) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(jar, { jar = it }, label = { Text("Existing SoulFireCLI jar (optional)") }, singleLine = true, modifier = Modifier.weight(1f))
                 Spacer(Modifier.size(8.dp))
@@ -136,19 +145,21 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
                 name = name,
                 type = type,
                 version = version.takeIf { !bots || jar.isBlank() },
-                port = port.toIntOrNull().takeIf { !bots },
+                port = port.toIntOrNull().takeIf { !bots && !client },
                 memory = memory.ifBlank { null },
                 jar = jar.ifBlank { null }.takeIf { bots },
                 acceptEula = acceptEula,
                 offlineMode = offline && type.isServer,
                 bots = if (bots) BotSettings(target, count.toInt(), prefix.ifBlank { "Bot" }) else null,
+                client = if (client) ClientSettings(username, target.ifBlank { null }) else null,
             )
             state.createInstance(request, onDone = onClose)
         }
     }
 }
 
-private val CREATABLE = listOf(InstanceType.PAPER, InstanceType.FOLIA, InstanceType.VELOCITY, InstanceType.WATERFALL, InstanceType.SOULFIRE)
+private val CREATABLE = InstanceType.entries.filter { it.software != null }
+private const val NO_TARGET = "main menu"
 
 @Composable
 private fun ChoiceField(label: String, value: String, choices: List<String>, onChange: (String) -> Unit) {

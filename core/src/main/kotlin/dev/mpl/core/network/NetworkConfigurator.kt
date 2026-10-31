@@ -15,60 +15,96 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 object NetworkConfigurator {
-    fun proxyOf(instances: List<InstanceDef>): InstanceDef? = instances.firstOrNull { it.type == InstanceType.VELOCITY }
+    fun proxyOf(instances: List<InstanceDef>): InstanceDef? = instances.firstOrNull { it.type.isProxy }
 
     fun backendsOf(instances: List<InstanceDef>): List<InstanceDef> =
-        instances.filter { it.type == InstanceType.PAPER || it.type == InstanceType.FOLIA }.sortedBy { it.name }
+        instances.filter { it.type.isServer }.sortedByDescending { it.name.contains("lobby", ignoreCase = true) }
+
+    fun usesModernForwarding(proxy: InstanceDef, backends: List<InstanceDef>): Boolean =
+        proxy.type == InstanceType.VELOCITY && backends.all { it.type.isPaperBased && atLeast(it.version, 13) }
 
     fun sync(project: ProjectDef, instances: List<InstanceDef>) {
         val proxy = proxyOf(instances) ?: return
         val backends = backendsOf(instances)
-        configureVelocity(project, proxy, backends)
-        backends.forEach { configurePaper(project, it) }
+        val modern = usesModernForwarding(proxy, backends)
+        if (proxy.type == InstanceType.VELOCITY) configureVelocity(project, proxy, backends, modern) else configureBungee(project, proxy, backends)
+        backends.forEach { configureBackend(project, it, modern) }
     }
 
-    private fun configureVelocity(project: ProjectDef, proxy: InstanceDef, backends: List<InstanceDef>) {
+    private fun configureVelocity(project: ProjectDef, proxy: InstanceDef, backends: List<InstanceDef>, modern: Boolean) {
         val dir = Path(proxy.dir)
-        val configFile = dir.resolve("velocity.toml")
-        var config = if (configFile.exists()) configFile.readText() else defaultVelocityConfig(dir.resolve(proxy.jar))
+        val file = dir.resolve("velocity.toml")
+        var config = if (file.exists()) file.readText() else bundledResource(dir.resolve(proxy.jar), "default-velocity.toml")
 
         proxy.port?.let { config = TomlPatch.setTopLevel(config, "bind", "\"0.0.0.0:$it\"") }
         config = TomlPatch.setTopLevel(config, "online-mode", project.onlineMode.toString())
-        config = TomlPatch.setTopLevel(config, "player-info-forwarding-mode", "\"MODERN\"")
+        config = TomlPatch.setTopLevel(config, "player-info-forwarding-mode", if (modern) "\"MODERN\"" else "\"LEGACY\"")
         config = TomlPatch.setTopLevel(config, "forwarding-secret-file", "\"forwarding.secret\"")
-
-        val tryOrder = backends.sortedByDescending { it.name.contains("lobby", ignoreCase = true) }.map { "\"${it.name}\"" }
-        val servers = backends.map { "${it.name} = \"127.0.0.1:${it.port}\"" } + "try = [${tryOrder.joinToString(", ")}]"
+        val servers = backends.map { "${it.name} = \"127.0.0.1:${it.port}\"" } + "try = [${backends.joinToString(", ") { "\"${it.name}\"" }}]"
         config = TomlPatch.replaceSection(config, "servers", servers)
         config = TomlPatch.replaceSection(config, "forced-hosts", emptyList())
 
-        configFile.writeText(config)
+        file.writeText(config)
         dir.resolve("forwarding.secret").writeText(project.forwardingSecret)
     }
 
-    private fun configurePaper(project: ProjectDef, server: InstanceDef) {
+    private fun configureBungee(project: ProjectDef, proxy: InstanceDef, backends: List<InstanceDef>) {
+        val file = Path(proxy.dir).resolve("config.yml")
+        val port = proxy.port ?: 25577
+        var config = if (file.exists()) file.readText() else ""
+        config = YamlPatch.replaceTopLevel(config, "servers", backends.flatMap {
+            listOf("  ${it.name}:", "    motd: '${it.name}'", "    address: 127.0.0.1:${it.port}", "    restricted: false")
+        })
+        config = YamlPatch.replaceTopLevel(config, "listeners", listOf(
+            "- host: 0.0.0.0:$port",
+            "  query_port: $port",
+            "  query_enabled: false",
+            "  motd: '${project.name}'",
+            "  max_players: 100",
+            "  priorities:",
+        ) + backends.map { "  - ${it.name}" } + listOf(
+            "  force_default_server: true",
+            "  forced_hosts: {}",
+            "  tab_list: GLOBAL_PING",
+            "  tab_size: 60",
+            "  bind_local_address: true",
+            "  ping_passthrough: false",
+            "  proxy_protocol: false",
+        ))
+        config = YamlPatch.set(config, listOf("ip_forward"), "true")
+        config = YamlPatch.set(config, listOf("online_mode"), project.onlineMode.toString())
+        file.writeText(config.trimStart('\n') + "\n")
+    }
+
+    private fun configureBackend(project: ProjectDef, server: InstanceDef, modern: Boolean) {
         val dir = Path(server.dir)
         PropertiesFile.update(dir.resolve("server.properties"), mapOf("online-mode" to "false"))
+        patchYaml(dir.resolve("spigot.yml"), listOf("settings", "bungeecord"), (!modern).toString())
+        if (!server.type.isPaperBased) return
 
-        val legacy = dir.resolve("paper.yml")
-        val (file, root) = if (!isModernPaper(server.version) && legacy.exists()) legacy to listOf("settings", "velocity-support")
+        val legacyPaper = dir.resolve("paper.yml")
+        val (file, root) = if (!atLeast(server.version, 19) && legacyPaper.exists()) legacyPaper to listOf("settings", "velocity-support")
         else dir.resolve("config").createDirectories().resolve("paper-global.yml") to listOf("proxies", "velocity")
-
-        var yaml = if (file.exists()) file.readText() else ""
-        yaml = YamlPatch.set(yaml, root + "enabled", "true")
-        yaml = YamlPatch.set(yaml, root + "online-mode", project.onlineMode.toString())
-        yaml = YamlPatch.set(yaml, root + "secret", "'${project.forwardingSecret}'")
-        file.writeText(yaml.trimStart('\n'))
+        patchYaml(file, root + "enabled", modern.toString())
+        if (modern) {
+            patchYaml(file, root + "online-mode", project.onlineMode.toString())
+            patchYaml(file, root + "secret", "'${project.forwardingSecret}'")
+        }
     }
 
-    private fun isModernPaper(version: String): Boolean {
+    private fun patchYaml(file: Path, path: List<String>, value: String) {
+        val text = if (file.exists()) file.readText() else ""
+        file.writeText(YamlPatch.set(text, path, value).trimStart('\n'))
+    }
+
+    private fun atLeast(version: String, minor: Int): Boolean {
         val parts = version.split('.', '-').mapNotNull { it.toIntOrNull() }
-        val (major, minor) = (parts.getOrNull(0) ?: return true) to (parts.getOrNull(1) ?: 0)
-        return major > 1 || minor >= 19
+        val major = parts.getOrNull(0) ?: return true
+        return major > 1 || (parts.getOrNull(1) ?: 0) >= minor
     }
 
-    private fun defaultVelocityConfig(jar: Path): String = ZipFile(jar.toFile()).use { zip ->
-        val entry = zip.getEntry("default-velocity.toml") ?: error("No default-velocity.toml in $jar")
+    private fun bundledResource(jar: Path, name: String): String = ZipFile(jar.toFile()).use { zip ->
+        val entry = zip.getEntry(name) ?: error("No $name in $jar")
         zip.getInputStream(entry).bufferedReader().readText()
     }
 }

@@ -33,7 +33,8 @@ import dev.mpl.api.InstanceType
 fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier) {
     val proxies = state.projectInstances.filter { it.def.type.isProxy }
     val bots = state.projectInstances.filter { it.def.type == InstanceType.SOULFIRE }
-    val servers = state.projectInstances - (proxies + bots).toSet()
+    val clients = state.projectInstances.filter { it.def.type == InstanceType.CLIENT }
+    val servers = state.projectInstances - (proxies + bots + clients).toSet()
     val project = state.project ?: return
 
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
@@ -54,6 +55,7 @@ fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier
             section("Proxies", proxies, state)
             section("Servers", servers, state)
             section("Bots", bots, state)
+            section("Clients", clients, state)
         }
         Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) { Text("Add server or proxy") }
     }
@@ -96,6 +98,7 @@ private fun InstanceRow(info: InstanceInfo, selected: Boolean, onClick: () -> Un
             Text(info.def.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 info.def.bots?.let { "${it.accountNames.size} bots → ${it.target}" }
+                    ?: info.def.client?.let { "${it.username} · ${info.def.version}" + (it.target?.let { target -> " → $target" } ?: "") }
                     ?: ("${info.def.type.name.lowercase()} ${info.def.version}" + (info.def.port?.let { "  ·  :$it" } ?: "")),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -4,21 +4,38 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class InstanceType(val fillProject: String?, val isProxy: Boolean) {
-    @SerialName("paper") PAPER("paper", false),
-    @SerialName("folia") FOLIA("folia", false),
-    @SerialName("velocity") VELOCITY("velocity", true),
-    @SerialName("waterfall") WATERFALL("waterfall", true),
-    @SerialName("soulfire") SOULFIRE(null, false),
-    @SerialName("custom") CUSTOM(null, false);
+enum class InstanceType(val software: String?, val role: Role) {
+    @SerialName("paper") PAPER("paper", Role.SERVER),
+    @SerialName("folia") FOLIA("folia", Role.SERVER),
+    @SerialName("purpur") PURPUR("purpur", Role.SERVER),
+    @SerialName("spigot") SPIGOT("spigot", Role.SERVER),
+    @SerialName("velocity") VELOCITY("velocity", Role.PROXY),
+    @SerialName("waterfall") WATERFALL("waterfall", Role.PROXY),
+    @SerialName("bungeecord") BUNGEECORD("bungeecord", Role.PROXY),
+    @SerialName("soulfire") SOULFIRE("soulfire", Role.BOTS),
+    @SerialName("client") CLIENT("minecraft", Role.CLIENT),
+    @SerialName("custom") CUSTOM(null, Role.OTHER);
 
-    val isServer: Boolean get() = this == PAPER || this == FOLIA
+    enum class Role { SERVER, PROXY, BOTS, CLIENT, OTHER }
+
+    val isServer: Boolean get() = role == Role.SERVER
+    val isProxy: Boolean get() = role == Role.PROXY
+    val isPaperBased: Boolean get() = this == PAPER || this == FOLIA || this == PURPUR
 
     val defaultStopCommand: String
-        get() = when (this) {
-            VELOCITY, WATERFALL -> "end"
-            SOULFIRE -> "quit"
+        get() = when (role) {
+            Role.PROXY -> "end"
+            Role.BOTS -> "quit"
+            Role.CLIENT -> ""
             else -> "stop"
+        }
+
+    val defaultReadyPattern: String
+        get() = when (this) {
+            WATERFALL, BUNGEECORD -> """Listening on /"""
+            SOULFIRE -> """Loaded \d+ accounts"""
+            CLIENT -> """Setting user: """
+            else -> """Done \([0-9.,]+s\)!"""
         }
 }
 
@@ -89,7 +106,8 @@ data class InstanceDef(
     val build: Int? = null,
     val dir: String,
     val jar: String = "server.jar",
-    val java: String = "java",
+    val java: String = AUTO_JAVA,
+    val javaVersion: Int? = null,
     val memory: String = "2G",
     val jvmArgs: List<String> = emptyList(),
     val args: List<String> = emptyList(),
@@ -98,17 +116,22 @@ data class InstanceDef(
     val readyPattern: String? = null,
     val env: Map<String, String> = emptyMap(),
     val bots: BotSettings? = null,
+    val client: ClientSettings? = null,
 ) {
     val id: InstanceId get() = InstanceId(project, name)
     val effectiveStopCommand: String get() = stopCommand ?: type.defaultStopCommand
-    val effectiveReadyPattern: String
-        get() = readyPattern ?: if (type == InstanceType.SOULFIRE) BOTS_READY_PATTERN else DEFAULT_READY_PATTERN
+    val effectiveReadyPattern: String get() = readyPattern ?: type.defaultReadyPattern
 
     companion object {
-        const val DEFAULT_READY_PATTERN = """Done \([0-9.,]+s\)!"""
-        const val BOTS_READY_PATTERN = """Loaded \d+ accounts"""
+        const val AUTO_JAVA = "auto"
     }
 }
+
+@Serializable
+data class ClientSettings(
+    val username: String,
+    val target: String? = null,
+)
 
 @Serializable
 data class BotSettings(
@@ -148,6 +171,7 @@ data class CreateInstanceRequest(
     val acceptEula: Boolean = true,
     val offlineMode: Boolean = false,
     val bots: BotSettings? = null,
+    val client: ClientSettings? = null,
 )
 
 @Serializable data class CommandRequest(val command: String)

@@ -18,6 +18,7 @@ import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import dev.mpl.api.BotSettings
+import dev.mpl.api.ClientSettings
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.DaemonConnection
@@ -201,7 +202,11 @@ class ListInstances : ClientCommand("ls", "List instances of all projects") {
     }
 }
 
-class Versions : ClientCommand("versions", "List available versions of paper, folia, velocity, waterfall or soulfire") {
+class JavaList : ClientCommand("java", "List Java installations found or downloaded (Java is picked per instance automatically)") {
+    override suspend fun execute(client: MplClient) = echo(client.javaInstallations().joinToString("\n").ifEmpty { "No Java installations found" })
+}
+
+class Versions : ClientCommand("versions", "List versions of paper, folia, purpur, spigot, velocity, waterfall, bungeecord, soulfire or minecraft") {
     private val software by argument()
     override suspend fun execute(client: MplClient) = echo(client.versions(software).versions.joinToString("\n"))
 }
@@ -217,7 +222,8 @@ class Create : ClientCommand("create", "Create an instance, downloading the serv
     private val memory by option("-m", "--memory")
     private val java by option("--java", help = "Java executable")
     private val online by option("--online", help = "Keep online-mode=true").flag()
-    private val target by option("--target", help = "Bots: instance to connect to (proxy or server)")
+    private val target by option("--target", help = "Bots/client: instance to connect to (proxy or server)")
+    private val username by option("--username", help = "Client: offline player name")
     private val count by option("--count", help = "Bots: number of bots").int().default(1)
     private val prefix by option("--prefix", help = "Bots: name prefix").default("Bot")
     private val accounts by option("--accounts", help = "Bots: comma separated names instead of prefix+count")
@@ -226,10 +232,11 @@ class Create : ClientCommand("create", "Create an instance, downloading the serv
     override suspend fun execute(client: MplClient) {
         val id = ref(name)
         echo("Creating $id...")
-        val bots = target?.let { BotSettings(it, count, prefix, accounts?.split(',')?.map(String::trim).orEmpty(), protocol) }
+        val bots = target?.takeIf { type == InstanceType.SOULFIRE }?.let { BotSettings(it, count, prefix, accounts?.split(',')?.map(String::trim).orEmpty(), protocol) }
+        val player = if (type == InstanceType.CLIENT) ClientSettings(username ?: id.name, target) else null
         val request = CreateInstanceRequest(
             project = id.project, name = id.name, type = type, version = version, build = build, dir = dir,
-            port = port, memory = memory, java = java, jar = jar, acceptEula = true, offlineMode = !online, bots = bots,
+            port = port, memory = memory, java = java, jar = jar, acceptEula = true, offlineMode = !online, bots = bots, client = player,
         )
         val info = client.create(request)
         echo("Created ${info.describe()} in ${info.def.dir}")
@@ -247,18 +254,27 @@ class Remove : ClientCommand("rm", "Remove an instance") {
 
 open class ActionCommand(private val action: String, help: String) : ClientCommand(action, help) {
     private val names by argument(help = "[project/]name").multiple(required = true)
-    private val wait by option("-w", "--wait", help = "Wait until the server is ready").flag()
+    private val wait by option("-w", "--wait", help = "Wait until the instance is ready").flag()
+    private val expect by option("-e", "--expect", help = "Also wait for a log line matching this regex")
+    private val expectIn by option("--expect-in", help = "[project/]name whose log to watch for --expect (default: the instance)")
     private val timeout by option("--timeout", help = "Seconds to wait").long().default(180)
 
     override suspend fun execute(client: MplClient) {
         for (id in names.map(::ref)) {
+            val watched = expectIn?.let(::ref) ?: id
             val since = client.instance(id).nextLogSeq
+            val expectSince = client.instance(watched).nextLogSeq
             val info = client.action(id, action)
-            if (wait && action in setOf("start", "restart")) {
-                val result = client.waitFor(id, info.def.effectiveReadyPattern, since, timeout * 1000)
-                if (!result.matched) throw MplException("$id did not become ready (state ${client.instance(id).state})")
+            if ((wait || expect != null) && action in setOf("start", "restart")) {
+                val ready = client.waitFor(id, info.def.effectiveReadyPattern, since, timeout * 1000)
+                if (!ready.matched) throw MplException("$id did not become ready (state ${client.instance(id).state})")
             }
             echo(client.instance(id).describe())
+            expect?.let { pattern ->
+                val result = client.waitFor(watched, pattern, expectSince, timeout * 1000)
+                if (!result.matched) throw MplException("No line matching '$pattern' in $watched within ${timeout}s")
+                echo(result.line!!.text)
+            }
         }
     }
 }
@@ -356,7 +372,7 @@ fun main(args: Array<String>) {
             Deploy(),
             GroupCommand("network", "Proxy network configuration (use -P project)").subcommands(NetworkSync()),
             GroupCommand("file", "Read and write instance files").subcommands(FileList(), FileRead(), FileWrite()),
-            ListInstances(), Versions(), Create(), Remove(),
+            ListInstances(), Versions(), JavaList(), Create(), Remove(),
             Start(), Stop(), Restart(), Kill(), Send(), Bot(), Logs(), Wait(), Attach(), Open(),
         ).main(args)
     } catch (e: MplException) {

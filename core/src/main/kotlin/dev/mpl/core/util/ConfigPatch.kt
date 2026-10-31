@@ -28,6 +28,17 @@ object YamlPatch {
         return lines.joinToString("\n")
     }
 
+    fun replaceTopLevel(text: String, key: String, block: List<String>): String {
+        val lines = text.lines().toMutableList()
+        val start = lines.indexOfFirst { it.startsWith("$key:") }
+        val replacement = listOf("$key:") + block
+        if (start < 0) return (lines.dropLastWhile { it.isBlank() } + replacement).joinToString("\n")
+        val end = (start + 1 until lines.size).firstOrNull { lines[it].isContent() && lines[it].indentation() == 0 && !lines[it].startsWith("-") } ?: lines.size
+        repeat(end - start) { lines.removeAt(start) }
+        lines.addAll(start, replacement)
+        return lines.joinToString("\n")
+    }
+
     private fun String.indentation() = length - trimStart(' ').length
 
     private fun String.isContent() = isNotBlank() && !trimStart().startsWith("#")

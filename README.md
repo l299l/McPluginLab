@@ -51,11 +51,42 @@ secret, `[servers]` from the project's Paper servers, `try` = lobby first) and t
 (ignoring `-sources`, `-javadoc`, `original-`) is copied into the target servers' `plugins/`, replacing older versions,
 and running targets are restarted. Auto-deploy polls every 2 s and deploys once the jar is stable.
 
+## Server software and Java
+
+| Type | Source |
+|---|---|
+| `paper`, `folia`, `velocity`, `waterfall` | PaperMC Fill API (sha256 verified) |
+| `purpur` | Purpur API |
+| `spigot` | BuildTools, built once per version into the jar cache (takes a few minutes) |
+| `bungeecord` | md_5 Jenkins |
+| `soulfire` | GitHub releases, or `--jar` |
+| `client` | Mojang version manifest (built-in launcher) |
+
+Java is chosen per instance (`java: auto`): Paper-family servers use the Fill API minimum, other servers their
+Minecraft version (≤1.16 → 8, 1.17–1.20.4 → 17, 1.20.5+ → 21, 26.x → 25), proxies 21, SoulFire 25, clients Mojang's
+`javaVersion`. An exact installed match from `~/.jdks`, `/usr/lib/jvm`, sdkman or the cache is used; otherwise Temurin is
+downloaded from Adoptium. `mpl java` lists what is available.
+
+Networks work with every proxy: Velocity uses modern forwarding when all backends are Paper-based 1.13+, otherwise
+legacy forwarding with `bungeecord: true` in `spigot.yml`. BungeeCord/Waterfall get `servers`, `listeners` (priorities,
+`force_default_server`) and `ip_forward` written into `config.yml`.
+
+## Minecraft client
+
+```
+mpl create nbw/me -t client -v 26.3 --username Leon --target proxy
+mpl start nbw/me                          # downloads client, libraries, assets and Java, then joins the proxy
+```
+
+Clients are offline accounts with their own game folder per instance; versions, libraries and assets are shared in
+the cache. `options.txt` is set up for testing (no onboarding or multiplayer warning, no pause on focus loss).
+Stopping a client closes the game.
+
 ## Bots (SoulFire)
 
 ```
 mpl create nbw/bots -t soulfire --target proxy --count 4 --prefix Bot     # or --jar ~/SoulFireCLI-2.10.6.jar
-mpl start nbw/bots --wait
+mpl start nbw/bots --expect 'Bot1 joined the game' --expect-in nbw/lobby
 mpl bot nbw/bots -b Bot1 say /bw join --expect 'Bot1 issued server command: /bw join' --expect-in nbw/lobby
 mpl send nbw/lobby op Bot1 --expect 'Made Bot1'
 ```
@@ -80,5 +111,5 @@ Tools: `list_projects`, `list_instances`, `create_instance`, `start`/`restart` (
 | Path | Contents |
 |---|---|
 | `~/.local/share/mcpluginlab` (`MPL_HOME`) | projects, instance definitions, console logs, daemon info |
-| `~/.cache/mcpluginlab` (`MPL_CACHE`) | downloaded server jars |
+| `~/.cache/mcpluginlab` (`MPL_CACHE`) | server jars, JDKs, Minecraft client files, daemon runtime copies |
 | project folder (chosen per project) | server directories, default `~/.local/share/mcpluginlab/servers/<project>` |

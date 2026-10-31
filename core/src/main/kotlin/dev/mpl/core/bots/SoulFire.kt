@@ -39,12 +39,12 @@ class SoulFire(private val jarCache: Path, private val runtimeCache: Path) {
         return target
     }
 
-    fun command(def: InstanceDef, settings: BotSettings, address: String, protocolVersion: String): List<String> {
+    fun command(def: InstanceDef, java: String, settings: BotSettings, address: String, protocolVersion: String): List<String> {
         val dir = Path(def.dir)
         val home = prepareHome(dir.resolve("home"))
         val accounts = dir.resolve("accounts.txt").also { it.writeLines(settings.accountNames) }
         return buildList {
-            add(def.java)
+            add(java)
             add("-Xmx${def.memory}")
             add("-Dsf.cliHomeDir=$home")
             add("-Dterminal.jline=false")
