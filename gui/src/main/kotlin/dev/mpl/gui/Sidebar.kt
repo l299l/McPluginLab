@@ -46,6 +46,8 @@ fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier
         )
         Spacer(Modifier.size(8.dp))
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            item { NavRow("Plugins", "${state.plugins.size} linked", state.page == AppState.ProjectPage.PLUGINS) { state.page = AppState.ProjectPage.PLUGINS } }
+            item { NavRow("Network", if (proxies.isEmpty()) "no proxy" else "velocity", state.page == AppState.ProjectPage.NETWORK) { state.page = AppState.ProjectPage.NETWORK } }
             section("Proxies", proxies, state)
             section("Servers", servers, state)
         }
@@ -64,7 +66,16 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String
         )
     }
     items(rows, key = { it.def.id.toString() }) { info ->
-        InstanceRow(info, selected = info.def.id == state.selected, onClick = { state.selected = info.def.id })
+        InstanceRow(info, selected = state.page == AppState.ProjectPage.INSTANCE && info.def.id == state.selected, onClick = { state.select(info.def.id) })
+    }
+}
+
+@Composable
+private fun NavRow(title: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
+    val background = if (selected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(background).clickable(onClick = onClick).padding(10.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyLarge)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

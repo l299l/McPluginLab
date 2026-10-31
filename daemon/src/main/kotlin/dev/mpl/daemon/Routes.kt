@@ -5,11 +5,14 @@ import dev.mpl.api.CommandRequest
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.Event
+import dev.mpl.api.FileContent
 import dev.mpl.api.InstanceId
 import dev.mpl.api.LogPage
 import dev.mpl.api.MplJson
 import dev.mpl.api.Ok
+import dev.mpl.api.PluginLink
 import dev.mpl.api.TerminalSize
+import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.api.VersionList
 import dev.mpl.api.WaitResult
 import dev.mpl.core.Lab
@@ -27,7 +30,9 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
+import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
@@ -81,6 +86,21 @@ fun Application.module(daemon: Daemon) {
                 post { call.respond(daemon.lab.createProject(call.receive<CreateProjectRequest>())) }
 
                 route("/{project}") {
+                    patch { call.respond(daemon.lab.updateProject(call.project, call.receive<UpdateProjectRequest>())) }
+                    get("/plugins") { call.respond(daemon.lab.pluginStatuses(call.project)) }
+                    post("/plugins") { call.respond(daemon.lab.savePlugin(call.project, call.receive<PluginLink>())) }
+                    delete("/plugins/{plugin}") {
+                        daemon.lab.removePlugin(call.project, call.parameters["plugin"]!!)
+                        call.respond(Ok())
+                    }
+                    post("/deploy") {
+                        val name = call.request.queryParameters["plugin"]
+                        call.respond(withContext(Dispatchers.IO) { daemon.lab.deployPlugins(call.project, name) })
+                    }
+                    post("/network/sync") {
+                        withContext(Dispatchers.IO) { daemon.lab.syncNetwork(call.project) }
+                        call.respond(Ok())
+                    }
                     delete {
                         daemon.lab.removeProject(call.parameters["project"]!!, call.request.queryParameters["deleteFiles"].toBoolean())
                         call.respond(Ok())
@@ -130,6 +150,14 @@ private fun Route.instanceRoutes(lab: Lab) {
         call.respond(WaitResult(line != null, line, line?.seq?.plus(1) ?: process.log.nextSeq))
     }
 
+    get("/files") { call.respond(lab.files(call.instanceId).list(call.request.queryParameters["path"].orEmpty())) }
+    get("/file") { call.respond(lab.files(call.instanceId).read(call.request.queryParameters["path"] ?: throw IllegalArgumentException("path is required"))) }
+    put("/file") {
+        val content = call.receive<FileContent>()
+        lab.files(call.instanceId).write(content.path, content.text)
+        call.respond(Ok())
+    }
+
     webSocket("/attach") {
         val process = lab.get(call.instanceId).process
         val output = launch {
@@ -148,6 +176,9 @@ private fun Route.instanceRoutes(lab: Lab) {
         }
     }
 }
+
+private val ApplicationCall.project: String
+    get() = parameters["project"]!!
 
 private val ApplicationCall.waits: Boolean
     get() = request.queryParameters["wait"]?.toBoolean() ?: true

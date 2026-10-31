@@ -29,11 +29,27 @@ mpl open nbw/lobby                        # console in a new terminal window (MP
 mpl stop nbw/lobby nbw/proxy
 mpl ls
 mpl project ls
+
+mpl plugin add -P nbw nbw ~/NewBedwars-Free/newbedwars-plugin/target/NewBedwars-*.jar -t lobby -t game1
+mpl plugin add -P nbw nbw-proxy ~/NewBedwars-Free/newbedwars-proxy/target/NewBedwars-Proxy-*.jar -t proxy
+mpl deploy -P nbw                         # deploy now; linked jars also deploy automatically when they change
+mpl network sync -P nbw                   # rewrite proxy/backend forwarding config
+mpl project set nbw --online-mode false
+mpl file cat nbw/lobby server.properties
+mpl file write nbw/lobby config/paper-global.yml < paper-global.yml
 ```
 
 Instances are addressed as `project/name`; `-P project` or `MPL_PROJECT` sets the project for bare names
 (default `default`). Creating a server accepts the Minecraft EULA and sets `online-mode=false` (use `--online` to keep it).
 Existing server directories can be imported with `--dir <path> --jar <file>`.
+
+**Networks:** when a project contains a Velocity proxy, every start writes `velocity.toml` (modern forwarding, a per-project
+secret, `[servers]` from the project's Paper servers, `try` = lobby first) and the backends' `paper-global.yml` and
+`server.properties`. Adding or removing a server while the proxy runs triggers `velocity reload`.
+
+**Plugin links:** a link points at a jar, a glob like `target/MyPlugin-*.jar` or a folder. The newest matching jar
+(ignoring `-sources`, `-javadoc`, `original-`) is copied into the target servers' `plugins/`, replacing older versions,
+and running targets are restarted. Auto-deploy polls every 2 s and deploys once the jar is stable.
 
 ## Locations
 

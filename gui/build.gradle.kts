@@ -10,4 +10,5 @@ dependencies {
     implementation(compose.material3)
     implementation(libs.jediterm.core)
     implementation(libs.jediterm.ui)
+    implementation(libs.rsyntaxtextarea)
 }

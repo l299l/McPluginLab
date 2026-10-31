@@ -6,10 +6,14 @@ import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.default
 import com.github.ajalt.clikt.parameters.arguments.multiple
+import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.boolean
 import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
@@ -21,6 +25,8 @@ import dev.mpl.api.InstanceInfo
 import dev.mpl.api.InstanceType
 import dev.mpl.api.MplClient
 import dev.mpl.api.MplException
+import dev.mpl.api.PluginLink
+import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.daemon.Daemon
 import dev.mpl.gui.runGui
 import kotlinx.coroutines.runBlocking
@@ -70,11 +76,6 @@ class Gui : ClientCommand("gui", "Open the McPluginLab window") {
     override suspend fun execute(client: MplClient) = runGui(client)
 }
 
-class ProjectCommand : CliktCommand("project") {
-    override fun help(context: Context) = "Manage projects"
-    override fun run() = Unit
-}
-
 class ProjectList : ClientCommand("ls", "List projects") {
     override suspend fun execute(client: MplClient) {
         echo("%-20s %-10s %-8s %s".format("PROJECT", "INSTANCES", "RUNNING", "FOLDER"))
@@ -97,6 +98,88 @@ class ProjectRemove : ClientCommand("rm", "Remove a project and its instances") 
     override suspend fun execute(client: MplClient) {
         client.removeProject(name, deleteFiles)
         echo("Removed project $name")
+    }
+}
+
+class ProjectSet : ClientCommand("set", "Change project settings") {
+    private val name by argument()
+    private val onlineMode by option("--online-mode", help = "Proxy and forwarding online mode (true/false)").boolean()
+    override suspend fun execute(client: MplClient) {
+        val updated = client.updateProject(name, UpdateProjectRequest(onlineMode))
+        echo("${updated.def.name}: online-mode=${updated.def.onlineMode}")
+    }
+}
+
+class GroupCommand(name: String, private val help: String) : CliktCommand(name) {
+    override fun help(context: Context) = help
+    override fun run() = Unit
+}
+
+class PluginList : ClientCommand("ls", "List plugin links of a project") {
+    override suspend fun execute(client: MplClient) {
+        client.plugins(project).forEach { status ->
+            val link = status.link
+            echo("${link.name}: ${link.source} -> ${link.targets.ifEmpty { listOf("all servers") }.joinToString()}" +
+                (if (link.autoDeploy) " [auto]" else "") + (if (link.restart) " [restart]" else ""))
+            echo("    jar: ${status.jar ?: "none found"}" + (status.deployedJar?.let { ", deployed $it" } ?: "") + (status.error?.let { ", error: $it" } ?: ""))
+        }
+    }
+}
+
+class PluginAdd : ClientCommand("add", "Link a plugin jar (path, glob like target/MyPlugin-*.jar, or folder) to servers") {
+    private val name by argument()
+    private val source by argument()
+    private val targets by option("-t", "--target", help = "Instance name; repeat for more (default: all servers)").multiple()
+    private val manual by option("--manual", help = "Do not deploy automatically when the jar changes").flag()
+    private val noRestart by option("--no-restart", help = "Do not restart running servers after deploying").flag()
+
+    override suspend fun execute(client: MplClient) {
+        val absolute = if (source.startsWith("/") || source.startsWith("~")) source else java.io.File(source).absolutePath
+        client.savePlugin(project, PluginLink(name, absolute, targets, autoDeploy = !manual, restart = !noRestart))
+        echo("Linked $name in $project")
+    }
+}
+
+class PluginRemove : ClientCommand("rm", "Remove a plugin link") {
+    private val name by argument()
+    override suspend fun execute(client: MplClient) {
+        client.removePlugin(project, name)
+        echo("Removed $name from $project")
+    }
+}
+
+class Deploy : ClientCommand("deploy", "Deploy linked plugins of a project now") {
+    private val plugin by argument().optional()
+    override suspend fun execute(client: MplClient) {
+        client.deploy(project, plugin).forEach { echo("${it.link.name}: " + (it.error ?: "deployed ${it.deployedJar}")) }
+    }
+}
+
+class NetworkSync : ClientCommand("sync", "Write proxy and backend forwarding config for a project") {
+    override suspend fun execute(client: MplClient) {
+        client.syncNetwork(project)
+        echo("Network config of $project updated")
+    }
+}
+
+class FileList : ClientCommand("ls", "List files of an instance") {
+    private val name by argument(help = "[project/]name")
+    private val path by argument().default("")
+    override suspend fun execute(client: MplClient) =
+        client.files(ref(name), path).forEach { echo(if (it.directory) "${it.path}/" else it.path) }
+}
+
+class FileRead : ClientCommand("cat", "Print a file of an instance") {
+    private val name by argument(help = "[project/]name")
+    private val path by argument()
+    override suspend fun execute(client: MplClient) = echo(client.readFile(ref(name), path).text, trailingNewline = false)
+}
+
+class FileWrite : ClientCommand("write", "Replace a file of an instance with stdin") {
+    private val name by argument(help = "[project/]name")
+    private val path by argument()
+    override suspend fun execute(client: MplClient) {
+        client.writeFile(ref(name), path, System.`in`.readBytes().decodeToString())
     }
 }
 
@@ -234,7 +317,11 @@ fun main(args: Array<String>) {
     try {
         Mpl().subcommands(
             DaemonCommand(), Shutdown(), Gui(),
-            ProjectCommand().subcommands(ProjectList(), ProjectCreate(), ProjectRemove()),
+            GroupCommand("project", "Manage projects").subcommands(ProjectList(), ProjectCreate(), ProjectRemove(), ProjectSet()),
+            GroupCommand("plugin", "Manage plugin links (use -P project)").subcommands(PluginList(), PluginAdd(), PluginRemove()),
+            Deploy(),
+            GroupCommand("network", "Proxy network configuration (use -P project)").subcommands(NetworkSync()),
+            GroupCommand("file", "Read and write instance files").subcommands(FileList(), FileRead(), FileWrite()),
             ListInstances(), Versions(), Create(), Remove(),
             Start(), Stop(), Restart(), Kill(), Send(), Logs(), Wait(), Attach(), Open(),
         ).main(args)

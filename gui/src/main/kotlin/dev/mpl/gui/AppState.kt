@@ -9,7 +9,12 @@ import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.DaemonConnection
 import dev.mpl.api.InstanceId
 import dev.mpl.api.InstanceInfo
+import dev.mpl.api.FileEntry
 import dev.mpl.api.MplClient
+import dev.mpl.api.MplException
+import dev.mpl.api.PluginLink
+import dev.mpl.api.PluginStatus
+import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.api.ProjectInfo
 import dev.mpl.gui.terminal.ConsoleTerminal
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +31,9 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
         private set
     var openProject by mutableStateOf<String?>(null)
     var selected by mutableStateOf<InstanceId?>(null)
+    var page by mutableStateOf(ProjectPage.INSTANCE)
+    var plugins by mutableStateOf<List<PluginStatus>>(emptyList())
+        private set
     var busy by mutableStateOf<Set<String>>(emptySet())
         private set
     val snackbar = SnackbarHostState()
@@ -38,12 +46,44 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
 
     init {
         scope.launch { watchEvents() }
-        if (client.isOutdated) scope.launch { snackbar.showSnackbar("The daemon runs an older build; restart it to use this one.") }
+        if (client.isOutdated) report(MplException("The daemon runs an older build; restart it to use this one."))
     }
 
     fun open(project: String) {
         openProject = project
+        page = ProjectPage.INSTANCE
         selected = projectInstances.firstOrNull()?.def?.id
+        launchFor(project) {}
+    }
+
+    fun select(id: InstanceId) {
+        selected = id
+        page = ProjectPage.INSTANCE
+    }
+
+    fun savePlugin(link: PluginLink, onDone: () -> Unit) = launchFor("plugin:${link.name}") {
+        client.savePlugin(openProject!!, link)
+        onDone()
+    }
+
+    fun removePlugin(name: String) = launchFor("plugin:$name") { client.removePlugin(openProject!!, name) }
+
+    fun deploy(name: String?) = launchFor("plugin:${name ?: "*"}") {
+        client.deploy(openProject!!, name).firstOrNull { it.error != null }?.let { throw MplException(it.error!!) }
+    }
+
+    fun setOnlineMode(project: String, online: Boolean) = launchFor(project) { client.updateProject(project, UpdateProjectRequest(online)) }
+
+    fun syncNetwork(project: String) = launchFor("network:$project") { client.syncNetwork(project) }
+
+    suspend fun files(id: InstanceId, path: String): List<FileEntry> = client.files(id, path)
+
+    suspend fun readFile(id: InstanceId, path: String): String = client.readFile(id, path).text
+
+    suspend fun writeFile(id: InstanceId, path: String, text: String) = client.writeFile(id, path, text)
+
+    fun report(e: Throwable) {
+        scope.launch { snackbar.showSnackbar(e.message ?: e.toString()) }
     }
 
     fun console(id: InstanceId): ConsoleTerminal = consoles.getOrPut(id) { ConsoleTerminal(client, id) }
@@ -83,6 +123,8 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
         emptyList()
     }
 
+    enum class ProjectPage { INSTANCE, PLUGINS, NETWORK }
+
     fun isBusy(key: Any) = key.toString() in busy
 
     private suspend fun refresh() {
@@ -90,6 +132,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
         instances = client.instances()
         if (openProject != null && project == null) openProject = null
         if (selectedInstance == null) selected = projectInstances.firstOrNull()?.def?.id
+        plugins = openProject?.let { client.plugins(it) }.orEmpty()
     }
 
     private suspend fun watchEvents() {
@@ -108,13 +151,10 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
             block()
             refresh()
         } catch (e: Exception) {
-            scope.launch { report(e) }
+            report(e)
         } finally {
             busy = busy - key
         }
     }
 
-    private suspend fun report(e: Throwable) {
-        snackbar.showSnackbar(e.message ?: e.toString())
-    }
 }

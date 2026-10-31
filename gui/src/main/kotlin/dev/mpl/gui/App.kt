@@ -39,8 +39,11 @@ private fun ProjectScreen(state: AppState, project: String) {
         Sidebar(state, onCreate = { creating = true }, modifier = Modifier.width(272.dp).fillMaxHeight())
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Box(Modifier.weight(1f).fillMaxHeight()) {
-            val selected = state.selectedInstance
-            if (selected != null) InstancePane(state, selected) else EmptyState()
+            when (state.page) {
+                AppState.ProjectPage.PLUGINS -> PluginsPage(state)
+                AppState.ProjectPage.NETWORK -> NetworkPage(state)
+                AppState.ProjectPage.INSTANCE -> state.selectedInstance?.let { InstancePane(state, it) } ?: EmptyState()
+            }
         }
     }
 

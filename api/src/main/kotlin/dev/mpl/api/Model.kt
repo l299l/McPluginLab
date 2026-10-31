@@ -30,7 +30,37 @@ data class InstanceId(val project: String, val name: String) {
 data class ProjectDef(
     val name: String,
     val dir: String,
+    val onlineMode: Boolean = false,
+    val forwardingSecret: String = "",
+    val plugins: List<PluginLink> = emptyList(),
 )
+
+@Serializable
+data class PluginLink(
+    val name: String,
+    val source: String,
+    val targets: List<String> = emptyList(),
+    val autoDeploy: Boolean = true,
+    val restart: Boolean = true,
+)
+
+@Serializable
+data class PluginStatus(
+    val link: PluginLink,
+    val jar: String? = null,
+    val deployedJar: String? = null,
+    val deployedAt: Long? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class UpdateProjectRequest(val onlineMode: Boolean? = null)
+
+@Serializable
+data class FileEntry(val path: String, val directory: Boolean, val size: Long)
+
+@Serializable
+data class FileContent(val path: String, val text: String)
 
 @Serializable
 data class ProjectInfo(
@@ -121,4 +151,7 @@ sealed interface Event {
 
     @Serializable @SerialName("projects")
     data object ProjectsChanged : Event
+
+    @Serializable @SerialName("plugins")
+    data class PluginsChanged(val project: String) : Event
 }

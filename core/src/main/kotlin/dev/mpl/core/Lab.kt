@@ -9,8 +9,14 @@ import dev.mpl.api.InstanceInfo
 import dev.mpl.api.InstanceState
 import dev.mpl.api.InstanceType
 import dev.mpl.api.ProjectDef
+import dev.mpl.api.PluginLink
+import dev.mpl.api.PluginStatus
 import dev.mpl.api.ProjectInfo
+import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.core.download.FillClient
+import dev.mpl.core.files.InstanceFiles
+import dev.mpl.core.network.NetworkConfigurator
+import dev.mpl.core.plugins.PluginService
 import dev.mpl.core.process.LaunchSpec
 import dev.mpl.core.process.ManagedProcess
 import dev.mpl.core.util.PropertiesFile
@@ -28,6 +34,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
+import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.Path
 import kotlin.io.path.absolute
@@ -48,11 +55,15 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     class Instance(val def: InstanceDef, val process: ManagedProcess)
 
+    val plugins = PluginService(this, scope)
+
     init {
-        workspace.loadProjects().forEach { project ->
+        workspace.loadProjects().forEach { loaded ->
+            val project = if (loaded.forwardingSecret.isBlank()) loaded.copy(forwardingSecret = newSecret()).also(workspace::save) else loaded
             projects[project.name] = project
             workspace.loadInstances(project.name).forEach(::register)
         }
+        plugins.start()
     }
 
     fun projects(): List<ProjectInfo> = projects.values.sortedBy { it.name }.map { it.info() }
@@ -62,7 +73,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
         require(!projects.containsKey(req.name)) { "Project '${req.name}' already exists" }
         val dir = req.dir?.takeIf { it.isNotBlank() }?.let { Path(it).absolute().normalize() } ?: workspace.defaultProjectDir(req.name)
         dir.createDirectories()
-        val project = ProjectDef(req.name, dir.toString())
+        val project = ProjectDef(req.name, dir.toString(), forwardingSecret = newSecret())
         workspace.save(project)
         projects[project.name] = project
         _events.emit(Event.ProjectsChanged)
@@ -79,6 +90,56 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             if (dir.exists() && dir.listDirectoryEntries().isEmpty()) dir.toFile().delete()
         }
         _events.emit(Event.ProjectsChanged)
+    }
+
+    suspend fun updateProject(name: String, req: UpdateProjectRequest): ProjectInfo {
+        val updated = updateProjectDef(name) { project -> req.onlineMode?.let { project.copy(onlineMode = it) } ?: project }
+        syncNetwork(name, reloadProxy = false)
+        _events.emit(Event.ProjectsChanged)
+        return updated.info()
+    }
+
+    suspend fun savePlugin(project: String, link: PluginLink): List<PluginStatus> {
+        require(NAME.matches(link.name)) { "Invalid plugin name '${link.name}'" }
+        require(link.source.isNotBlank()) { "Plugin source is required" }
+        updateProjectDef(project) { def -> def.copy(plugins = def.plugins.filter { it.name != link.name } + link) }
+        pluginsChanged(project)
+        return pluginStatuses(project)
+    }
+
+    suspend fun removePlugin(project: String, name: String) {
+        updateProjectDef(project) { def -> def.copy(plugins = def.plugins.filter { it.name != name }) }
+        plugins.forget(project, name)
+        pluginsChanged(project)
+    }
+
+    fun pluginStatuses(project: String): List<PluginStatus> = plugins.statuses(project, project(project).plugins)
+
+    fun deployPlugins(project: String, name: String?): List<PluginStatus> {
+        val links = project(project).plugins.filter { name == null || it.name == name }
+        if (name != null && links.isEmpty()) throw NotFoundException("No plugin '$name' in $project")
+        return links.map { plugins.deploy(project, it) }
+    }
+
+    fun files(id: InstanceId) = InstanceFiles(get(id).def.dir)
+
+    fun syncNetwork(project: String, reloadProxy: Boolean = true) {
+        val defs = instanceDefs(project)
+        NetworkConfigurator.sync(project(project), defs)
+        val proxy = NetworkConfigurator.proxyOf(defs) ?: return
+        if (reloadProxy && isAlive(proxy.id)) sendCommand(proxy.id, "velocity reload")
+    }
+
+    fun instanceDefs(project: String): List<InstanceDef> = instances.values.map { it.def }.filter { it.project == project }
+
+    fun isAlive(id: InstanceId): Boolean = instances[id]?.process?.isAlive == true
+
+    fun note(id: InstanceId, message: String) {
+        instances[id]?.process?.log?.append("[mpl] $message")
+    }
+
+    fun pluginsChanged(project: String) {
+        _events.tryEmit(Event.PluginsChanged(project))
     }
 
     fun list(project: String? = null): List<InstanceInfo> = instances.values
@@ -125,17 +186,20 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             val eula = dir.resolve("eula.txt")
             if (req.acceptEula) eula.writeText("eula=true\n")
             require(eula.exists()) { "The Minecraft EULA (https://aka.ms/MinecraftEULA) must be accepted" }
-            if (req.offlineMode) PropertiesFile.update(dir.resolve("server.properties"), mapOf("online-mode" to "false"))
+            val properties = mapOf("white-list" to "false") + if (req.offlineMode) mapOf("online-mode" to "false") else emptyMap()
+            PropertiesFile.update(dir.resolve("server.properties"), properties)
         }
 
         workspace.save(def)
         register(def)
+        syncNetwork(def.project)
         _events.emit(Event.InstancesChanged(def.project))
         info(id)
     }
 
     fun start(id: InstanceId): InstanceInfo {
         val instance = get(id)
+        syncNetwork(id.project, reloadProxy = false)
         instance.process.start(launchSpec(instance.def))
         return instance.info()
     }
@@ -182,6 +246,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             require(dir.startsWith(projectDir) && dir != projectDir) { "Refusing to delete $dir: it is outside the project folder" }
             withContext(Dispatchers.IO) { dir.toFile().deleteRecursively() }
         }
+        if (projects.containsKey(id.project)) syncNetwork(id.project)
         _events.emit(Event.InstancesChanged(id.project))
     }
 
@@ -190,6 +255,14 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     }
 
     private fun project(name: String) = projects[name] ?: throw NotFoundException("No project '$name'")
+
+    private fun updateProjectDef(name: String, change: (ProjectDef) -> ProjectDef): ProjectDef {
+        val updated = projects.compute(name) { _, current -> change(current ?: throw NotFoundException("No project '$name'")) }!!
+        workspace.save(updated)
+        return updated
+    }
+
+    private fun newSecret() = ByteArray(16).also(SecureRandom()::nextBytes).toHexString()
 
     private fun register(def: InstanceDef) {
         val process = ManagedProcess(def.id.toString(), workspace.instanceLog(def.id), scope)

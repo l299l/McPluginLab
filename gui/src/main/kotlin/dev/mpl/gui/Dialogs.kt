@@ -37,6 +37,7 @@ import androidx.compose.ui.window.rememberDialogState
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.MplHome
+import dev.mpl.api.PluginLink
 import dev.mpl.api.InstanceType
 import kotlinx.coroutines.launch
 
@@ -57,7 +58,7 @@ fun CreateProjectDialog(state: AppState, onClose: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.size(8.dp))
-            OutlinedButton(onClick = { scope.launch { FolderPicker.pick(dir.ifBlank { null })?.let { dir = it } } }) { Text("Browse") }
+            OutlinedButton(onClick = { scope.launch { FilePicker.folder(dir.ifBlank { null })?.let { dir = it } } }) { Text("Browse") }
         }
         Spacer(Modifier.weight(1f))
         DialogButtons(confirm = "Create", enabled = name.isNotBlank() && !state.isBusy(name), onCancel = onClose) {
@@ -148,6 +149,59 @@ private fun VersionField(version: String, versions: List<String>, onChange: (Str
             }
         }
     }
+}
+
+@Composable
+fun LinkPluginDialog(state: AppState, onClose: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var source by remember { mutableStateOf("") }
+    var targets by remember { mutableStateOf(emptySet<String>()) }
+    var autoDeploy by remember { mutableStateOf(true) }
+    var restart by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+
+    MplDialog("Link plugin", onClose, height = 560) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                source, { source = it },
+                label = { Text("Jar, glob or folder") },
+                placeholder = { Text("~/MyPlugin/target/MyPlugin-*.jar") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.size(8.dp))
+            OutlinedButton(onClick = {
+                scope.launch {
+                    FilePicker.jar(source.substringBeforeLast('/').ifBlank { null })?.let { picked ->
+                        source = versionGlob(picked)
+                        if (name.isBlank()) name = picked.substringAfterLast('/').substringBefore('-').removeSuffix(".jar")
+                    }
+                }
+            }) { Text("Browse") }
+        }
+        OutlinedTextField(name, { name = it.trim() }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("Targets (none selected = all servers)", style = MaterialTheme.typography.labelLarge)
+        Column {
+            state.projectInstances.forEach { instance ->
+                val target = instance.def.name
+                CheckRow("$target (${instance.def.type.name.lowercase()})", target in targets) { checked ->
+                    targets = if (checked) targets + target else targets - target
+                }
+            }
+        }
+        CheckRow("Deploy automatically when the jar changes", autoDeploy) { autoDeploy = it }
+        CheckRow("Restart running servers after deploying", restart) { restart = it }
+        Spacer(Modifier.weight(1f))
+        DialogButtons(confirm = "Link", enabled = name.isNotBlank() && source.isNotBlank(), onCancel = onClose) {
+            state.savePlugin(PluginLink(name, source, targets.toList(), autoDeploy, restart), onDone = onClose)
+        }
+    }
+}
+
+private fun versionGlob(path: String): String {
+    val file = path.substringAfterLast('/')
+    val glob = file.replace(Regex("""-\d[\w.+-]*\.jar$"""), "-*.jar")
+    return path.removeSuffix(file) + glob
 }
 
 @Composable

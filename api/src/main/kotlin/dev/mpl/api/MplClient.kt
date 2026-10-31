@@ -13,7 +13,9 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -62,6 +64,33 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
 
     suspend fun removeProject(project: String, deleteFiles: Boolean): Ok =
         http.delete("/api/projects/$project") { auth(); parameter("deleteFiles", deleteFiles) }.parse()
+
+    suspend fun updateProject(project: String, req: UpdateProjectRequest): ProjectInfo = http.patch("/api/projects/$project") {
+        auth(); contentType(ContentType.Application.Json); setBody(req)
+    }.parse()
+
+    suspend fun plugins(project: String): List<PluginStatus> = http.get("/api/projects/$project/plugins") { auth() }.parse()
+
+    suspend fun savePlugin(project: String, link: PluginLink): List<PluginStatus> = http.post("/api/projects/$project/plugins") {
+        auth(); contentType(ContentType.Application.Json); setBody(link)
+    }.parse()
+
+    suspend fun removePlugin(project: String, name: String): Ok = http.delete("/api/projects/$project/plugins/$name") { auth() }.parse()
+
+    suspend fun deploy(project: String, plugin: String? = null): List<PluginStatus> =
+        http.post("/api/projects/$project/deploy") { auth(); plugin?.let { parameter("plugin", it) } }.parse()
+
+    suspend fun syncNetwork(project: String): Ok = http.post("/api/projects/$project/network/sync") { auth() }.parse()
+
+    suspend fun files(id: InstanceId, path: String = ""): List<FileEntry> =
+        http.get("${path(id)}/files") { auth(); parameter("path", path) }.parse()
+
+    suspend fun readFile(id: InstanceId, path: String): FileContent =
+        http.get("${path(id)}/file") { auth(); parameter("path", path) }.parse()
+
+    suspend fun writeFile(id: InstanceId, path: String, text: String): Ok = http.put("${path(id)}/file") {
+        auth(); contentType(ContentType.Application.Json); setBody(FileContent(path, text))
+    }.parse()
 
     suspend fun instances(project: String? = null): List<InstanceInfo> =
         http.get("/api/instances") { auth(); project?.let { parameter("project", it) } }.parse()
