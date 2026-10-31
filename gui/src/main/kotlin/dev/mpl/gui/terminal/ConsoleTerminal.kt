@@ -4,12 +4,13 @@ import com.jediterm.terminal.TerminalColor
 import com.jediterm.terminal.TextStyle
 import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
+import dev.mpl.api.InstanceId
 import dev.mpl.api.MplClient
 import java.awt.Font
 
-class ConsoleTerminal(client: MplClient, name: String) {
+class ConsoleTerminal(client: MplClient, id: InstanceId) {
     val widget = JediTermWidget(120, 40, Settings).apply {
-        setTtyConnector(DaemonTtyConnector(client, name))
+        setTtyConnector(DaemonTtyConnector(client, id))
         start()
     }
 

@@ -33,27 +33,33 @@ import dev.mpl.api.InstanceInfo
 
 @Composable
 fun InstancePane(state: AppState, info: InstanceInfo) {
-    val name = info.def.name
-    var removing by remember(name) { mutableStateOf(false) }
+    val id = info.def.id
+    var removing by remember(id) { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Header(state, info, onRemove = { removing = true })
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        key(name) {
-            SwingPanel(factory = { state.console(name).widget }, modifier = Modifier.fillMaxSize())
+        key(id) {
+            SwingPanel(factory = { state.console(id).widget }, modifier = Modifier.fillMaxSize())
         }
     }
 
-    if (removing) RemoveInstanceDialog(name, onClose = { removing = false }, onConfirm = { deleteFiles ->
-        removing = false
-        state.remove(name, deleteFiles)
-    })
+    if (removing) RemoveDialog(
+        title = "Remove ${info.def.name}?",
+        detail = info.def.dir,
+        deleteLabel = "Also delete the server folder",
+        onClose = { removing = false },
+        onConfirm = { deleteFiles ->
+            removing = false
+            state.removeInstance(id, deleteFiles)
+        },
+    )
 }
 
 @Composable
 private fun Header(state: AppState, info: InstanceInfo, onRemove: () -> Unit) {
-    val name = info.def.name
-    val busy = name in state.busy
+    val id = info.def.id
+    val busy = state.isBusy(id)
     val alive = info.state.isAlive
 
     Row(
@@ -61,7 +67,7 @@ private fun Header(state: AppState, info: InstanceInfo, onRemove: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(info.def.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(info.state.color))
                 Spacer(Modifier.size(6.dp))
@@ -71,6 +77,7 @@ private fun Header(state: AppState, info: InstanceInfo, onRemove: () -> Unit) {
                         "${info.def.type.name.lowercase()} ${info.def.version}" + (info.def.build?.let { " #$it" } ?: ""),
                         info.def.port?.let { "port $it" },
                         info.pid?.let { "pid $it" },
+                        info.def.dir.shortPath,
                     ).joinToString("  ·  "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -79,14 +86,14 @@ private fun Header(state: AppState, info: InstanceInfo, onRemove: () -> Unit) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (alive) {
-                OutlinedButton(onClick = { state.action(name, "restart") }, enabled = !busy) { Text("Restart") }
-                OutlinedButton(onClick = { state.action(name, "kill") }, enabled = !busy) { Text("Kill") }
-                Button(onClick = { state.action(name, "stop") }, enabled = !busy) { Text("Stop") }
+                OutlinedButton(onClick = { state.action(id, "restart") }, enabled = !busy) { Text("Restart") }
+                OutlinedButton(onClick = { state.action(id, "kill") }, enabled = !busy) { Text("Kill") }
+                Button(onClick = { state.action(id, "stop") }, enabled = !busy) { Text("Stop") }
             } else {
                 TextButton(onClick = onRemove, enabled = !busy) { Text("Remove") }
-                Button(onClick = { state.action(name, "start") }, enabled = !busy) { Text("Start") }
+                Button(onClick = { state.action(id, "start") }, enabled = !busy) { Text("Start") }
             }
-            OutlinedButton(onClick = { state.openInTerminal(name) }) { Text("Pop out") }
+            OutlinedButton(onClick = { state.openInTerminal(id) }) { Text("Pop out") }
         }
     }
 }

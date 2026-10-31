@@ -22,8 +22,8 @@ object DaemonConnection {
         return listOf(java, "--enable-native-access=ALL-UNNAMED", "-cp", System.getProperty("java.class.path"), MAIN_CLASS, *args)
     }
 
-    fun openInTerminal(name: String, terminal: String = System.getenv("MPL_TERMINAL") ?: "konsole") {
-        ProcessBuilder(listOf("setsid", terminal, "-e") + selfCommand("attach", name))
+    fun openInTerminal(id: InstanceId, terminal: String = System.getenv("MPL_TERMINAL") ?: "konsole") {
+        ProcessBuilder(listOf("setsid", terminal, "-e") + selfCommand("attach", id.toString()))
             .redirectOutput(ProcessBuilder.Redirect.DISCARD)
             .redirectErrorStream(true)
             .start()

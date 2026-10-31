@@ -1,5 +1,6 @@
 package dev.mpl.cli
 
+import dev.mpl.api.InstanceId
 import dev.mpl.api.MplClient
 import dev.mpl.api.MplJson
 import dev.mpl.api.TerminalSize
@@ -15,13 +16,13 @@ import sun.misc.Signal
 
 private const val DETACH_KEY = 0x1d
 
-fun attach(client: MplClient, name: String) {
+fun attach(client: MplClient, id: InstanceId) {
     val saved = stty("-g").trim()
     stty("raw", "-echo")
-    println("[attached to $name, Ctrl+] to detach]\r")
+    println("[attached to $id, Ctrl+] to detach]\r")
     try {
         runBlocking {
-            client.attach(name) {
+            client.attach(id) {
                 val resizes = Channel<Unit>(Channel.CONFLATED)
                 runCatching { Signal.handle(Signal("WINCH")) { resizes.trySend(Unit) } }
                 resizes.trySend(Unit)
@@ -56,7 +57,7 @@ fun attach(client: MplClient, name: String) {
         }
     } finally {
         stty(saved)
-        println("\r\n[detached from $name]")
+        println("\r\n[detached from $id]")
     }
 }
 

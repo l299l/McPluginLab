@@ -5,47 +5,76 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.mpl.api.CreateInstanceRequest
+import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.DaemonConnection
+import dev.mpl.api.InstanceId
 import dev.mpl.api.InstanceInfo
 import dev.mpl.api.MplClient
+import dev.mpl.api.ProjectInfo
 import dev.mpl.gui.terminal.ConsoleTerminal
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AppState(val client: MplClient, private val scope: CoroutineScope) {
+    var projects by mutableStateOf<List<ProjectInfo>>(emptyList())
+        private set
     var instances by mutableStateOf<List<InstanceInfo>>(emptyList())
         private set
-    var selected by mutableStateOf<String?>(null)
+    var openProject by mutableStateOf<String?>(null)
+    var selected by mutableStateOf<InstanceId?>(null)
     var busy by mutableStateOf<Set<String>>(emptySet())
         private set
     val snackbar = SnackbarHostState()
 
-    private val consoles = mutableMapOf<String, ConsoleTerminal>()
+    private val consoles = mutableMapOf<InstanceId, ConsoleTerminal>()
 
-    val selectedInstance: InstanceInfo? get() = instances.firstOrNull { it.def.name == selected }
+    val project: ProjectInfo? get() = projects.firstOrNull { it.def.name == openProject }
+    val projectInstances: List<InstanceInfo> get() = instances.filter { it.def.project == openProject }
+    val selectedInstance: InstanceInfo? get() = projectInstances.firstOrNull { it.def.id == selected }
 
     init {
         scope.launch { watchEvents() }
     }
 
-    fun console(name: String): ConsoleTerminal = consoles.getOrPut(name) { ConsoleTerminal(client, name) }
+    fun open(project: String) {
+        openProject = project
+        selected = projectInstances.firstOrNull()?.def?.id
+    }
 
-    fun action(name: String, action: String) = launchFor(name) { client.action(name, action) }
+    fun console(id: InstanceId): ConsoleTerminal = consoles.getOrPut(id) { ConsoleTerminal(client, id) }
 
-    fun openInTerminal(name: String) = launchFor(name) { DaemonConnection.openInTerminal(name) }
+    fun action(id: InstanceId, action: String) = launchFor(id.toString()) { client.action(id, action) }
 
-    fun create(request: CreateInstanceRequest, onDone: () -> Unit) = launchFor(request.name) {
-        client.create(request)
-        selected = request.name
+    fun openInTerminal(id: InstanceId) = launchFor(id.toString()) { DaemonConnection.openInTerminal(id) }
+
+    fun openFolder(path: String) = launchFor(path) { withContext(Dispatchers.IO) { ProcessBuilder("xdg-open", path).start() } }
+
+    fun createProject(request: CreateProjectRequest, onDone: () -> Unit) = launchFor(request.name) {
+        client.createProject(request)
         onDone()
     }
 
-    fun remove(name: String, deleteFiles: Boolean) = launchFor(name) {
-        client.remove(name, deleteFiles)
-        consoles.remove(name)?.close()
-        if (selected == name) selected = null
+    fun removeProject(name: String, deleteFiles: Boolean) = launchFor(name) {
+        client.removeProject(name, deleteFiles)
+        consoles.keys.filter { it.project == name }.forEach { consoles.remove(it)?.close() }
+        if (openProject == name) openProject = null
+    }
+
+    fun createInstance(request: CreateInstanceRequest, onDone: () -> Unit) = launchFor(request.name) {
+        val created = client.create(request)
+        refresh()
+        selected = created.def.id
+        onDone()
+    }
+
+    fun removeInstance(id: InstanceId, deleteFiles: Boolean) = launchFor(id.toString()) {
+        client.remove(id, deleteFiles)
+        consoles.remove(id)?.close()
+        if (selected == id) selected = null
     }
 
     suspend fun versions(project: String): List<String> = runCatching { client.versions(project).versions }.getOrElse {
@@ -53,9 +82,13 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
         emptyList()
     }
 
+    fun isBusy(key: Any) = key.toString() in busy
+
     private suspend fun refresh() {
+        projects = client.projects()
         instances = client.instances()
-        if (selected == null || instances.none { it.def.name == selected }) selected = instances.firstOrNull()?.def?.name
+        if (openProject != null && project == null) openProject = null
+        if (selectedInstance == null) selected = projectInstances.firstOrNull()?.def?.id
     }
 
     private suspend fun watchEvents() {
@@ -68,15 +101,15 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
         }
     }
 
-    private fun launchFor(name: String, block: suspend () -> Unit) = scope.launch {
-        busy = busy + name
+    private fun launchFor(key: String, block: suspend () -> Unit) = scope.launch {
+        busy = busy + key
         try {
             block()
             refresh()
         } catch (e: Exception) {
             scope.launch { report(e) }
         } finally {
-            busy = busy - name
+            busy = busy - key
         }
     }
 

@@ -2,6 +2,7 @@ package dev.mpl.gui.terminal
 
 import com.jediterm.core.util.TermSize
 import com.jediterm.terminal.TtyConnector
+import dev.mpl.api.InstanceId
 import dev.mpl.api.MplClient
 import dev.mpl.api.MplJson
 import dev.mpl.api.TerminalSize
@@ -19,7 +20,7 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.concurrent.LinkedBlockingQueue
 
-class DaemonTtyConnector(private val client: MplClient, private val name: String) : TtyConnector {
+class DaemonTtyConnector(private val client: MplClient, private val id: InstanceId) : TtyConnector {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val received = LinkedBlockingQueue<ByteArray>()
     private val reader = InputStreamReader(QueueInputStream(received), Charsets.UTF_8)
@@ -30,10 +31,10 @@ class DaemonTtyConnector(private val client: MplClient, private val name: String
         scope.launch {
             while (isActive) {
                 runCatching {
-                    client.attach(name) {
+                    client.attach(id) {
                         received.put(CLEAR_SCREEN)
                         val sender = launch { for (frame in pending) send(frame) }
-                        for (frame in incoming) if (frame is Frame.Binary) received.put(frame.readBytes())
+                        for (frame in incoming) if (frame is Frame.Binary) frame.readBytes().takeIf { it.isNotEmpty() }?.let(received::put)
                         sender.cancel()
                     }
                 }
@@ -64,16 +65,17 @@ class DaemonTtyConnector(private val client: MplClient, private val name: String
         return 0
     }
 
-    override fun getName() = name
+    override fun getName() = id.toString()
 
     override fun close() {
         open = false
         scope.cancel()
-        received.put(ByteArray(0))
+        received.put(END_OF_STREAM)
     }
 
     private companion object {
         val CLEAR_SCREEN = "\u001B[H\u001B[2J\u001B[3J".toByteArray()
+        val END_OF_STREAM = ByteArray(0)
     }
 
     private class QueueInputStream(private val queue: LinkedBlockingQueue<ByteArray>) : InputStream() {
@@ -86,10 +88,10 @@ class DaemonTtyConnector(private val client: MplClient, private val name: String
         }
 
         override fun read(b: ByteArray, off: Int, len: Int): Int {
-            if (position >= current.size) {
+            while (position >= current.size) {
                 current = queue.take()
                 position = 0
-                if (current.isEmpty()) return -1
+                if (current === END_OF_STREAM) return -1
             }
             val n = minOf(len, current.size - position)
             System.arraycopy(current, position, b, off, n)

@@ -3,7 +3,7 @@ package dev.mpl.daemon
 import dev.mpl.api.DaemonInfo
 import dev.mpl.api.MplHome
 import dev.mpl.api.MplJson
-import dev.mpl.core.InstanceManager
+import dev.mpl.core.Lab
 import dev.mpl.core.Workspace
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
@@ -22,10 +22,10 @@ import java.util.concurrent.CountDownLatch
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.writeText
 
-class Daemon(home: Path = MplHome.path) {
-    val workspace = Workspace(home)
+class Daemon(home: Path = MplHome.path, cache: Path = MplHome.cache) {
+    val workspace = Workspace(home, cache)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val instances = InstanceManager(workspace, scope)
+    val lab = Lab(workspace, scope)
     val token: String = ByteArray(24).also(SecureRandom()::nextBytes).toHexString()
 
     private val stopLatch = CountDownLatch(1)
@@ -52,7 +52,7 @@ class Daemon(home: Path = MplHome.path) {
     @Synchronized
     fun shutdown() {
         if (stopLatch.count == 0L) return
-        runBlocking { instances.stopAll() }
+        runBlocking { lab.stopAll() }
         workspace.root.resolve("daemon.json").deleteIfExists()
         server.stop(500, 2_000)
         scope.cancel()

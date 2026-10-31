@@ -15,7 +15,36 @@ enum class InstanceType(val fillProject: String?, val isProxy: Boolean) {
 }
 
 @Serializable
+data class InstanceId(val project: String, val name: String) {
+    override fun toString() = "$project/$name"
+
+    companion object {
+        fun parse(value: String, defaultProject: String): InstanceId {
+            val project = value.substringBefore('/', defaultProject)
+            return InstanceId(project, value.substringAfter('/'))
+        }
+    }
+}
+
+@Serializable
+data class ProjectDef(
+    val name: String,
+    val dir: String,
+)
+
+@Serializable
+data class ProjectInfo(
+    val def: ProjectDef,
+    val instances: Int,
+    val running: Int,
+)
+
+@Serializable
+data class CreateProjectRequest(val name: String, val dir: String? = null)
+
+@Serializable
 data class InstanceDef(
+    val project: String,
     val name: String,
     val type: InstanceType,
     val version: String = "",
@@ -31,6 +60,7 @@ data class InstanceDef(
     val readyPattern: String? = null,
     val env: Map<String, String> = emptyMap(),
 ) {
+    val id: InstanceId get() = InstanceId(project, name)
     val effectiveStopCommand: String get() = stopCommand ?: type.defaultStopCommand
     val effectiveReadyPattern: String get() = readyPattern ?: DEFAULT_READY_PATTERN
 
@@ -53,6 +83,7 @@ data class InstanceInfo(
 
 @Serializable
 data class CreateInstanceRequest(
+    val project: String,
     val name: String,
     val type: InstanceType,
     val version: String? = null,
@@ -62,7 +93,7 @@ data class CreateInstanceRequest(
     val memory: String? = null,
     val java: String? = null,
     val jar: String? = null,
-    val acceptEula: Boolean = false,
+    val acceptEula: Boolean = true,
     val offlineMode: Boolean = false,
 )
 
@@ -83,11 +114,11 @@ data class TerminalSize(val cols: Int, val rows: Int)
 @Serializable
 sealed interface Event {
     @Serializable @SerialName("state")
-    data class StateChanged(val name: String, val state: InstanceState, val exitCode: Int? = null) : Event
+    data class StateChanged(val id: InstanceId, val state: InstanceState, val exitCode: Int? = null) : Event
 
-    @Serializable @SerialName("created")
-    data class Created(val name: String) : Event
+    @Serializable @SerialName("instances")
+    data class InstancesChanged(val project: String) : Event
 
-    @Serializable @SerialName("removed")
-    data class Removed(val name: String) : Event
+    @Serializable @SerialName("projects")
+    data object ProjectsChanged : Event
 }

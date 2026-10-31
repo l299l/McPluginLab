@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,16 +30,26 @@ import dev.mpl.api.InstanceInfo
 
 @Composable
 fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier) {
-    val (proxies, servers) = state.instances.partition { it.def.type.isProxy }
+    val (proxies, servers) = state.projectInstances.partition { it.def.type.isProxy }
+    val project = state.project ?: return
 
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
-        Text("McPluginLab", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(8.dp))
+        TextButton(onClick = { state.openProject = null }) { Text("← Projects") }
+        Text(project.def.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+        Text(
+            project.def.dir.shortPath,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp).clickable { state.openFolder(project.def.dir) },
+        )
         Spacer(Modifier.size(8.dp))
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             section("Proxies", proxies, state)
             section("Servers", servers, state)
         }
-        Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) { Text("New instance") }
+        Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) { Text("Add server or proxy") }
     }
 }
 
@@ -52,8 +63,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String
             modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 4.dp),
         )
     }
-    items(rows, key = { it.def.name }) { info ->
-        InstanceRow(info, selected = info.def.name == state.selected, onClick = { state.selected = info.def.name })
+    items(rows, key = { it.def.id.toString() }) { info ->
+        InstanceRow(info, selected = info.def.id == state.selected, onClick = { state.selected = info.def.id })
     }
 }
 

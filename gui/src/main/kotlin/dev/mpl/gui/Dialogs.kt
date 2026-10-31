@@ -17,6 +17,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -25,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,17 +35,46 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import dev.mpl.api.CreateInstanceRequest
+import dev.mpl.api.CreateProjectRequest
+import dev.mpl.api.MplHome
 import dev.mpl.api.InstanceType
+import kotlinx.coroutines.launch
 
 @Composable
-fun CreateInstanceDialog(state: AppState, onClose: () -> Unit) {
+fun CreateProjectDialog(state: AppState, onClose: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var dir by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    MplDialog("New project", onClose, height = 330) {
+        OutlinedTextField(name, { name = it.trim() }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                dir, { dir = it },
+                label = { Text("Servers folder") },
+                placeholder = { Text(MplHome.path.resolve("servers").resolve(name.ifBlank { "<name>" }).toString()) },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.size(8.dp))
+            OutlinedButton(onClick = { scope.launch { FolderPicker.pick(dir.ifBlank { null })?.let { dir = it } } }) { Text("Browse") }
+        }
+        Spacer(Modifier.weight(1f))
+        DialogButtons(confirm = "Create", enabled = name.isNotBlank() && !state.isBusy(name), onCancel = onClose) {
+            state.createProject(CreateProjectRequest(name, dir.ifBlank { null }), onDone = onClose)
+        }
+    }
+}
+
+@Composable
+fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var type by remember { mutableStateOf(InstanceType.PAPER) }
     var versions by remember { mutableStateOf(emptyList<String>()) }
     var version by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("") }
     var memory by remember { mutableStateOf("") }
-    var acceptEula by remember { mutableStateOf(false) }
+    var acceptEula by remember { mutableStateOf(true) }
     var offline by remember { mutableStateOf(true) }
     var submitted by remember { mutableStateOf(false) }
 
@@ -52,10 +83,10 @@ fun CreateInstanceDialog(state: AppState, onClose: () -> Unit) {
         version = versions.firstOrNull { v -> v.none(Char::isLetter) }.orEmpty()
     }
 
-    val creating = submitted && name in state.busy
+    val creating = submitted && state.isBusy(name)
     val canCreate = name.isNotBlank() && version.isNotBlank() && (type.isProxy || acceptEula) && !creating
 
-    MplDialog("New instance", onClose, height = 560) {
+    MplDialog("New instance in $project", onClose, height = 560) {
         OutlinedTextField(name, { name = it.trim() }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             InstanceType.entries.filter { it.fillProject != null }.forEach {
@@ -75,6 +106,7 @@ fun CreateInstanceDialog(state: AppState, onClose: () -> Unit) {
         DialogButtons(confirm = if (creating) "Downloading…" else "Create", enabled = canCreate, onCancel = onClose) {
             submitted = true
             val request = CreateInstanceRequest(
+                project = project,
                 name = name,
                 type = type,
                 version = version,
@@ -83,16 +115,17 @@ fun CreateInstanceDialog(state: AppState, onClose: () -> Unit) {
                 acceptEula = acceptEula,
                 offlineMode = offline && !type.isProxy,
             )
-            state.create(request, onDone = onClose)
+            state.createInstance(request, onDone = onClose)
         }
     }
 }
 
 @Composable
-fun RemoveInstanceDialog(name: String, onClose: () -> Unit, onConfirm: (deleteFiles: Boolean) -> Unit) {
+fun RemoveDialog(title: String, detail: String?, deleteLabel: String, onClose: () -> Unit, onConfirm: (deleteFiles: Boolean) -> Unit) {
     var deleteFiles by remember { mutableStateOf(false) }
-    MplDialog("Remove $name?", onClose, height = 230) {
-        CheckRow("Also delete the server directory", deleteFiles) { deleteFiles = it }
+    MplDialog(title, onClose, height = 250) {
+        detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        CheckRow(deleteLabel, deleteFiles) { deleteFiles = it }
         Spacer(Modifier.weight(1f))
         DialogButtons(confirm = "Remove", enabled = true, onCancel = onClose) { onConfirm(deleteFiles) }
     }

@@ -22,24 +22,32 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun App(state: AppState) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(Modifier.weight(1f)) {
+            val project = state.project
+            if (project == null) HomeScreen(state) else ProjectScreen(state, project.def.name)
+        }
+        SnackbarHost(state.snackbar)
+    }
+}
+
+@Composable
+private fun ProjectScreen(state: AppState, project: String) {
     var creating by remember { mutableStateOf(false) }
 
-    Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Row(Modifier.fillMaxSize()) {
         Sidebar(state, onCreate = { creating = true }, modifier = Modifier.width(272.dp).fillMaxHeight())
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            Box(Modifier.weight(1f)) {
-                val selected = state.selectedInstance
-                if (selected != null) InstancePane(state, selected) else EmptyState()
-            }
-            SnackbarHost(state.snackbar)
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            val selected = state.selectedInstance
+            if (selected != null) InstancePane(state, selected) else EmptyState()
         }
     }
 
-    if (creating) CreateInstanceDialog(state, onClose = { creating = false })
+    if (creating) CreateInstanceDialog(state, project, onClose = { creating = false })
 }
 
 @Composable
 private fun EmptyState() = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    Text("Create a server or proxy to get started", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("Add a server or proxy to this project", color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

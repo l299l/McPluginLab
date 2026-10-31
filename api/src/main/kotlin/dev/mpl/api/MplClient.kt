@@ -54,31 +54,40 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
 
     suspend fun ping(): Boolean = runCatching { http.get("/api/ping") { auth() }.status.isSuccess() }.getOrDefault(false)
 
-    suspend fun instances(): List<InstanceInfo> = http.get("/api/instances") { auth() }.parse()
+    suspend fun projects(): List<ProjectInfo> = http.get("/api/projects") { auth() }.parse()
 
-    suspend fun instance(name: String): InstanceInfo = http.get("/api/instances/$name") { auth() }.parse()
-
-    suspend fun create(req: CreateInstanceRequest): InstanceInfo = http.post("/api/instances") {
+    suspend fun createProject(req: CreateProjectRequest): ProjectInfo = http.post("/api/projects") {
         auth(); contentType(ContentType.Application.Json); setBody(req)
     }.parse()
 
-    suspend fun remove(name: String, deleteFiles: Boolean): Ok =
-        http.delete("/api/instances/$name") { auth(); parameter("deleteFiles", deleteFiles) }.parse()
+    suspend fun removeProject(project: String, deleteFiles: Boolean): Ok =
+        http.delete("/api/projects/$project") { auth(); parameter("deleteFiles", deleteFiles) }.parse()
 
-    suspend fun action(name: String, action: String): InstanceInfo =
-        http.post("/api/instances/$name/$action") { auth() }.parse()
+    suspend fun instances(project: String? = null): List<InstanceInfo> =
+        http.get("/api/instances") { auth(); project?.let { parameter("project", it) } }.parse()
 
-    suspend fun command(name: String, command: String): Ok = http.post("/api/instances/$name/command") {
+    suspend fun instance(id: InstanceId): InstanceInfo = http.get(path(id)) { auth() }.parse()
+
+    suspend fun create(req: CreateInstanceRequest): InstanceInfo = http.post("/api/projects/${req.project}/instances") {
+        auth(); contentType(ContentType.Application.Json); setBody(req)
+    }.parse()
+
+    suspend fun remove(id: InstanceId, deleteFiles: Boolean): Ok =
+        http.delete(path(id)) { auth(); parameter("deleteFiles", deleteFiles) }.parse()
+
+    suspend fun action(id: InstanceId, action: String): InstanceInfo = http.post("${path(id)}/$action") { auth() }.parse()
+
+    suspend fun command(id: InstanceId, command: String): Ok = http.post("${path(id)}/command") {
         auth(); contentType(ContentType.Application.Json); setBody(CommandRequest(command))
     }.parse()
 
-    suspend fun log(name: String, since: Long, limit: Int = 500, waitMs: Long = 0): LogPage =
-        http.get("/api/instances/$name/log") {
+    suspend fun log(id: InstanceId, since: Long, limit: Int = 500, waitMs: Long = 0): LogPage =
+        http.get("${path(id)}/log") {
             auth(); parameter("since", since); parameter("limit", limit); parameter("waitMs", waitMs)
         }.parse()
 
-    suspend fun waitFor(name: String, pattern: String, since: Long?, timeoutMs: Long): WaitResult =
-        http.get("/api/instances/$name/wait") {
+    suspend fun waitFor(id: InstanceId, pattern: String, since: Long?, timeoutMs: Long): WaitResult =
+        http.get("${path(id)}/wait") {
             auth(); parameter("pattern", pattern); since?.let { parameter("since", it) }; parameter("timeoutMs", timeoutMs)
         }.parse()
 
@@ -86,13 +95,15 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
 
     suspend fun shutdown(): Ok = http.post("/api/shutdown") { auth() }.parse()
 
-    suspend fun attach(name: String, block: suspend DefaultClientWebSocketSession.() -> Unit) =
-        http.webSocket("ws://$address/api/instances/$name/attach?token=${info.token}", block = block)
+    suspend fun attach(id: InstanceId, block: suspend DefaultClientWebSocketSession.() -> Unit) =
+        http.webSocket("ws://$address${path(id)}/attach?token=${info.token}", block = block)
 
     suspend fun events(block: suspend DefaultClientWebSocketSession.() -> Unit) =
         http.webSocket("ws://$address/api/events?token=${info.token}", block = block)
 
     override fun close() = http.close()
+
+    private fun path(id: InstanceId) = "/api/projects/${id.project}/instances/${id.name}"
 
     companion object {
         fun fromHome(): MplClient? {
