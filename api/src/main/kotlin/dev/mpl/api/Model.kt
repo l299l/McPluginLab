@@ -9,9 +9,17 @@ enum class InstanceType(val fillProject: String?, val isProxy: Boolean) {
     @SerialName("folia") FOLIA("folia", false),
     @SerialName("velocity") VELOCITY("velocity", true),
     @SerialName("waterfall") WATERFALL("waterfall", true),
+    @SerialName("soulfire") SOULFIRE(null, false),
     @SerialName("custom") CUSTOM(null, false);
 
-    val defaultStopCommand: String get() = if (this == VELOCITY || this == WATERFALL) "end" else "stop"
+    val isServer: Boolean get() = this == PAPER || this == FOLIA
+
+    val defaultStopCommand: String
+        get() = when (this) {
+            VELOCITY, WATERFALL -> "end"
+            SOULFIRE -> "quit"
+            else -> "stop"
+        }
 }
 
 @Serializable
@@ -89,14 +97,28 @@ data class InstanceDef(
     val stopCommand: String? = null,
     val readyPattern: String? = null,
     val env: Map<String, String> = emptyMap(),
+    val bots: BotSettings? = null,
 ) {
     val id: InstanceId get() = InstanceId(project, name)
     val effectiveStopCommand: String get() = stopCommand ?: type.defaultStopCommand
-    val effectiveReadyPattern: String get() = readyPattern ?: DEFAULT_READY_PATTERN
+    val effectiveReadyPattern: String
+        get() = readyPattern ?: if (type == InstanceType.SOULFIRE) BOTS_READY_PATTERN else DEFAULT_READY_PATTERN
 
     companion object {
         const val DEFAULT_READY_PATTERN = """Done \([0-9.,]+s\)!"""
+        const val BOTS_READY_PATTERN = """Loaded \d+ accounts"""
     }
+}
+
+@Serializable
+data class BotSettings(
+    val target: String,
+    val count: Int = 1,
+    val prefix: String = "Bot",
+    val accounts: List<String> = emptyList(),
+    val protocolVersion: String? = null,
+) {
+    val accountNames: List<String> get() = accounts.ifEmpty { (1..count).map { "$prefix$it" } }
 }
 
 @Serializable
@@ -125,6 +147,7 @@ data class CreateInstanceRequest(
     val jar: String? = null,
     val acceptEula: Boolean = true,
     val offlineMode: Boolean = false,
+    val bots: BotSettings? = null,
 )
 
 @Serializable data class CommandRequest(val command: String)

@@ -13,6 +13,7 @@ import dev.mpl.api.PluginLink
 import dev.mpl.api.PluginStatus
 import dev.mpl.api.ProjectInfo
 import dev.mpl.api.UpdateProjectRequest
+import dev.mpl.core.bots.SoulFire
 import dev.mpl.core.download.FillClient
 import dev.mpl.core.files.InstanceFiles
 import dev.mpl.core.network.NetworkConfigurator
@@ -48,6 +49,7 @@ class NotFoundException(message: String) : RuntimeException(message)
 
 class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     private val fill = FillClient(workspace.jarCache)
+    private val soulFire = SoulFire(workspace.jarCache, workspace.soulFireRuntime)
     private val projects = ConcurrentHashMap<String, ProjectDef>()
     private val instances = ConcurrentHashMap<InstanceId, Instance>()
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 256)
@@ -151,7 +153,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     fun get(id: InstanceId): Instance = instances[id] ?: throw NotFoundException("No instance '$id'")
 
-    fun versions(project: String): List<String> = fill.versions(project)
+    fun versions(software: String): List<String> = if (software == "soulfire") soulFire.versions() else fill.versions(software)
 
     suspend fun create(req: CreateInstanceRequest): InstanceInfo = withContext(Dispatchers.IO) {
         val id = InstanceId(req.project, req.name)
@@ -166,12 +168,17 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             name = req.name,
             type = req.type,
             dir = dir.toString(),
-            port = req.port ?: nextFreePort(req.type),
+            port = if (req.type == InstanceType.SOULFIRE) null else req.port ?: nextFreePort(req.type),
             memory = req.memory ?: if (req.type.isProxy) "512M" else "2G",
             java = req.java ?: "java",
         )
         val existingJar = req.jar
-        def = if (existingJar != null) {
+        def = if (req.type == InstanceType.SOULFIRE) {
+            val bots = requireNotNull(req.bots) { "Bot instances need bot settings (target, count)" }
+            require(instances.containsKey(InstanceId(req.project, bots.target))) { "No instance '${bots.target}' in ${req.project} to connect bots to" }
+            val jar = existingJar?.let { dir.resolve(it) }?.also { require(it.exists()) { "Jar $it not found" } } ?: soulFire.download(req.version)
+            def.copy(jar = jar.toString(), version = req.version ?: jar.fileName.toString().removePrefix("SoulFireCLI-").removeSuffix(".jar"), bots = bots)
+        } else if (existingJar != null) {
             require(dir.resolve(existingJar).exists()) { "Jar $existingJar not found in $dir" }
             def.copy(jar = existingJar, version = req.version.orEmpty())
         } else {
@@ -182,7 +189,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             def.copy(version = jar.version, build = jar.build)
         }
 
-        if (!req.type.isProxy && req.type != InstanceType.CUSTOM) {
+        if (req.type.isServer) {
             val eula = dir.resolve("eula.txt")
             if (req.acceptEula) eula.writeText("eula=true\n")
             require(eula.exists()) { "The Minecraft EULA (https://aka.ms/MinecraftEULA) must be accepted" }
@@ -274,6 +281,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     private fun launchSpec(def: InstanceDef): LaunchSpec {
         val dir = Path(def.dir)
+        if (def.type == InstanceType.SOULFIRE) return botLaunchSpec(def)
         val portArgs = def.port?.let { port ->
             when (def.type) {
                 InstanceType.PAPER, InstanceType.FOLIA -> {
@@ -296,6 +304,18 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             addAll(def.args)
         }
         return LaunchSpec(command, dir, def.env, def.effectiveStopCommand, Regex(def.effectiveReadyPattern))
+    }
+
+    private fun botLaunchSpec(def: InstanceDef): LaunchSpec {
+        val bots = requireNotNull(def.bots) { "${def.id} has no bot settings" }
+        val target = get(InstanceId(def.project, bots.target)).def
+        val port = requireNotNull(target.port) { "${target.id} has no port" }
+        val version = bots.protocolVersion
+            ?: target.version.takeIf { target.type.isServer }
+            ?: instanceDefs(def.project).firstOrNull { it.type.isServer }?.version
+            ?: throw IllegalArgumentException("Set a protocol version for ${def.id}")
+        val command = soulFire.command(def, bots, "127.0.0.1:$port", version)
+        return LaunchSpec(command, Path(def.dir), def.env, def.effectiveStopCommand, Regex(def.effectiveReadyPattern))
     }
 
     private fun nextFreePort(type: InstanceType): Int {

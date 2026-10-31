@@ -75,7 +75,7 @@ class PluginService(private val lab: Lab, private val scope: CoroutineScope) {
 
     private fun targets(project: String, link: PluginLink): List<InstanceDef> {
         val instances = lab.instanceDefs(project)
-        return if (link.targets.isEmpty()) instances.filter { !it.type.isProxy } else instances.filter { it.name in link.targets }
+        return if (link.targets.isEmpty()) instances.filter { it.type.isServer } else instances.filter { it.name in link.targets }
     }
 
     private fun isDeployed(jar: Signature, targets: List<InstanceDef>) = targets.all { target ->

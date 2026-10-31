@@ -17,6 +17,7 @@ import kotlin.io.path.writeText
 class Workspace(home: Path, cache: Path) {
     val root: Path = home.toAbsolutePath().normalize()
     val jarCache: Path = cache.toAbsolutePath().normalize().resolve("jars")
+    val soulFireRuntime: Path = cache.toAbsolutePath().normalize().resolve("soulfire")
     private val projectsDir: Path = root.resolve("projects")
     private val serversDir: Path = root.resolve("servers")
     private val logsDir: Path = root.resolve("logs")

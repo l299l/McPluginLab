@@ -17,6 +17,7 @@ import com.github.ajalt.clikt.parameters.types.boolean
 import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
+import dev.mpl.api.BotSettings
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.DaemonConnection
@@ -29,6 +30,8 @@ import dev.mpl.api.PluginLink
 import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.daemon.Daemon
 import dev.mpl.gui.runGui
+import dev.mpl.mcp.LabTools
+import dev.mpl.mcp.McpServer
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
@@ -70,6 +73,10 @@ class Shutdown : ClientCommand("shutdown", "Stop all instances and the daemon") 
         echo(client.shutdown().message)
         ProcessHandle.of(client.info.pid).ifPresent { it.onExit().get(2, TimeUnit.MINUTES) }
     }
+}
+
+class Mcp : ClientCommand("mcp", "Run an MCP server on stdio for AI agents (claude mcp add mpl -- mpl mcp)") {
+    override suspend fun execute(client: MplClient) = McpServer(LabTools(client).all, System.`in`.bufferedReader(), System.out).run()
 }
 
 class Gui : ClientCommand("gui", "Open the McPluginLab window") {
@@ -194,7 +201,7 @@ class ListInstances : ClientCommand("ls", "List instances of all projects") {
     }
 }
 
-class Versions : ClientCommand("versions", "List available versions of paper, folia, velocity or waterfall") {
+class Versions : ClientCommand("versions", "List available versions of paper, folia, velocity, waterfall or soulfire") {
     private val software by argument()
     override suspend fun execute(client: MplClient) = echo(client.versions(software).versions.joinToString("\n"))
 }
@@ -210,13 +217,19 @@ class Create : ClientCommand("create", "Create an instance, downloading the serv
     private val memory by option("-m", "--memory")
     private val java by option("--java", help = "Java executable")
     private val online by option("--online", help = "Keep online-mode=true").flag()
+    private val target by option("--target", help = "Bots: instance to connect to (proxy or server)")
+    private val count by option("--count", help = "Bots: number of bots").int().default(1)
+    private val prefix by option("--prefix", help = "Bots: name prefix").default("Bot")
+    private val accounts by option("--accounts", help = "Bots: comma separated names instead of prefix+count")
+    private val protocol by option("--protocol", help = "Bots: protocol version (default: target server version)")
 
     override suspend fun execute(client: MplClient) {
         val id = ref(name)
         echo("Creating $id...")
+        val bots = target?.let { BotSettings(it, count, prefix, accounts?.split(',')?.map(String::trim).orEmpty(), protocol) }
         val request = CreateInstanceRequest(
             project = id.project, name = id.name, type = type, version = version, build = build, dir = dir,
-            port = port, memory = memory, java = java, jar = jar, acceptEula = true, offlineMode = !online,
+            port = port, memory = memory, java = java, jar = jar, acceptEula = true, offlineMode = !online, bots = bots,
         )
         val info = client.create(request)
         echo("Created ${info.describe()} in ${info.def.dir}")
@@ -255,11 +268,32 @@ class Stop : ActionCommand("stop", "Stop instances gracefully")
 class Restart : ActionCommand("restart", "Restart instances")
 class Kill : ActionCommand("kill", "Kill instances")
 
-class Send : ClientCommand("send", "Send a console command") {
+abstract class SendingCommand(name: String, help: String) : ClientCommand(name, help) {
+    private val expect by option("-e", "--expect", help = "Wait for a log line matching this regex after sending")
+    private val expectIn by option("--expect-in", help = "[project/]name whose log to watch (default: the target)")
+    private val timeout by option("--timeout", help = "Seconds to wait for --expect").long().default(30)
+
+    protected suspend fun sendAndExpect(client: MplClient, target: InstanceId, line: String) {
+        val watched = expectIn?.let(::ref) ?: target
+        val result = client.sendAndExpect(target, line, watched, expect, timeout * 1000) ?: return
+        if (!result.matched) throw MplException("No line matching '$expect' in $watched within ${timeout}s")
+        echo(result.line!!.text)
+    }
+}
+
+class Send : SendingCommand("send", "Send a console command") {
     private val name by argument(help = "[project/]name")
     private val command by argument().multiple(required = true)
+    override suspend fun execute(client: MplClient) = sendAndExpect(client, ref(name), command.joinToString(" "))
+}
+
+class Bot : SendingCommand("bot", "Send a SoulFire command to bots, e.g. mpl bot nbw/bots -b Bot1 say /bw join") {
+    private val name by argument(help = "[project/]name of the bot instance")
+    private val bots by option("-b", "--bots", help = "Comma separated bot names (default: all)")
+    private val command by argument().multiple(required = true)
     override suspend fun execute(client: MplClient) {
-        client.command(ref(name), command.joinToString(" "))
+        val line = command.joinToString(" ")
+        sendAndExpect(client, ref(name), bots?.let { "bot $it $line" } ?: line)
     }
 }
 
@@ -316,14 +350,14 @@ private fun InstanceInfo.describe() =
 fun main(args: Array<String>) {
     try {
         Mpl().subcommands(
-            DaemonCommand(), Shutdown(), Gui(),
+            DaemonCommand(), Shutdown(), Gui(), Mcp(),
             GroupCommand("project", "Manage projects").subcommands(ProjectList(), ProjectCreate(), ProjectRemove(), ProjectSet()),
             GroupCommand("plugin", "Manage plugin links (use -P project)").subcommands(PluginList(), PluginAdd(), PluginRemove()),
             Deploy(),
             GroupCommand("network", "Proxy network configuration (use -P project)").subcommands(NetworkSync()),
             GroupCommand("file", "Read and write instance files").subcommands(FileList(), FileRead(), FileWrite()),
             ListInstances(), Versions(), Create(), Remove(),
-            Start(), Stop(), Restart(), Kill(), Send(), Logs(), Wait(), Attach(), Open(),
+            Start(), Stop(), Restart(), Kill(), Send(), Bot(), Logs(), Wait(), Attach(), Open(),
         ).main(args)
     } catch (e: MplException) {
         System.err.println(e.message)

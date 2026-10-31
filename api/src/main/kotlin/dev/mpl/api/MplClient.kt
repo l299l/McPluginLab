@@ -121,6 +121,18 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
             auth(); parameter("pattern", pattern); since?.let { parameter("since", it) }; parameter("timeoutMs", timeoutMs)
         }.parse()
 
+    suspend fun sendAndExpect(target: InstanceId, line: String, watched: InstanceId, pattern: String?, timeoutMs: Long): WaitResult? {
+        var cursor = instance(watched).nextLogSeq
+        command(target, line)
+        pattern ?: return null
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            val result = waitFor(watched, pattern, cursor, maxOf(0, deadline - System.currentTimeMillis()))
+            if (!result.matched || result.line!!.text.trim() != line.trim()) return result
+            cursor = result.next
+        }
+    }
+
     suspend fun versions(project: String): VersionList = http.get("/api/versions/$project") { auth() }.parse()
 
     suspend fun shutdown(): Ok = http.post("/api/shutdown") { auth() }.parse()

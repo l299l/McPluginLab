@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
+import dev.mpl.api.BotSettings
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.MplHome
@@ -78,30 +79,54 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
     var acceptEula by remember { mutableStateOf(true) }
     var offline by remember { mutableStateOf(true) }
     var submitted by remember { mutableStateOf(false) }
+    val targets = state.projectInstances.map { it.def }.filter { it.type != InstanceType.SOULFIRE }
+    var target by remember { mutableStateOf(targets.firstOrNull { it.type.isProxy }?.name ?: targets.firstOrNull()?.name.orEmpty()) }
+    var count by remember { mutableStateOf("2") }
+    var prefix by remember { mutableStateOf("Bot") }
+    var jar by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val bots = type == InstanceType.SOULFIRE
 
     LaunchedEffect(type) {
-        versions = state.versions(type.fillProject!!)
-        version = versions.firstOrNull { v -> v.none(Char::isLetter) }.orEmpty()
+        versions = state.versions(type.fillProject ?: "soulfire")
+        version = versions.firstOrNull { v -> v.none(Char::isLetter) } ?: versions.firstOrNull().orEmpty()
     }
 
     val creating = submitted && state.isBusy(name)
-    val canCreate = name.isNotBlank() && version.isNotBlank() && (type.isProxy || acceptEula) && !creating
+    val canCreate = name.isNotBlank() && !creating && when {
+        bots -> target.isNotBlank() && (count.toIntOrNull() ?: 0) > 0 && (version.isNotBlank() || jar.isNotBlank())
+        else -> version.isNotBlank() && (type.isProxy || acceptEula)
+    }
 
-    MplDialog("New instance in $project", onClose, height = 560) {
+    MplDialog("New instance in $project", onClose, height = 600) {
         OutlinedTextField(name, { name = it.trim() }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InstanceType.entries.filter { it.fillProject != null }.forEach {
+            CREATABLE.forEach {
                 FilterChip(selected = type == it, onClick = { type = it }, label = { Text(it.name.lowercase()) })
             }
         }
-        VersionField(version, versions, onChange = { version = it })
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(port, { port = it.filter(Char::isDigit) }, label = { Text("Port (auto)") }, singleLine = true, modifier = Modifier.weight(1f))
-            OutlinedTextField(memory, { memory = it.trim() }, label = { Text(if (type.isProxy) "Memory (512M)" else "Memory (2G)") }, singleLine = true, modifier = Modifier.weight(1f))
-        }
-        if (!type.isProxy) {
-            CheckRow("Accept the Minecraft EULA (aka.ms/MinecraftEULA)", acceptEula) { acceptEula = it }
-            CheckRow("Offline mode (online-mode=false)", offline) { offline = it }
+        if (bots) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(jar, { jar = it }, label = { Text("Existing SoulFireCLI jar (optional)") }, singleLine = true, modifier = Modifier.weight(1f))
+                Spacer(Modifier.size(8.dp))
+                OutlinedButton(onClick = { scope.launch { FilePicker.jar(jar.ifBlank { null })?.let { jar = it } } }) { Text("Browse") }
+            }
+            if (jar.isBlank()) VersionField(version, versions, onChange = { version = it })
+            ChoiceField("Connect to", target, targets.map { it.name }, onChange = { target = it })
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(count, { count = it.filter(Char::isDigit) }, label = { Text("Bots") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(prefix, { prefix = it.trim() }, label = { Text("Name prefix") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+        } else {
+            VersionField(version, versions, onChange = { version = it })
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(port, { port = it.filter(Char::isDigit) }, label = { Text("Port (auto)") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(memory, { memory = it.trim() }, label = { Text(if (type.isProxy) "Memory (512M)" else "Memory (2G)") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+            if (type.isServer) {
+                CheckRow("Accept the Minecraft EULA (aka.ms/MinecraftEULA)", acceptEula) { acceptEula = it }
+                CheckRow("Offline mode (online-mode=false)", offline) { offline = it }
+            }
         }
         Spacer(Modifier.weight(1f))
         DialogButtons(confirm = if (creating) "Downloading…" else "Create", enabled = canCreate, onCancel = onClose) {
@@ -110,13 +135,35 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
                 project = project,
                 name = name,
                 type = type,
-                version = version,
-                port = port.toIntOrNull(),
+                version = version.takeIf { !bots || jar.isBlank() },
+                port = port.toIntOrNull().takeIf { !bots },
                 memory = memory.ifBlank { null },
+                jar = jar.ifBlank { null }.takeIf { bots },
                 acceptEula = acceptEula,
-                offlineMode = offline && !type.isProxy,
+                offlineMode = offline && type.isServer,
+                bots = if (bots) BotSettings(target, count.toInt(), prefix.ifBlank { "Bot" }) else null,
             )
             state.createInstance(request, onDone = onClose)
+        }
+    }
+}
+
+private val CREATABLE = listOf(InstanceType.PAPER, InstanceType.FOLIA, InstanceType.VELOCITY, InstanceType.WATERFALL, InstanceType.SOULFIRE)
+
+@Composable
+private fun ChoiceField(label: String, value: String, choices: List<String>, onChange: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedTextField(
+            value, {},
+            readOnly = true,
+            label = { Text(label) },
+            singleLine = true,
+            trailingIcon = { TextButton(onClick = { expanded = true }) { Text("▾") } },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+            choices.forEach { DropdownMenuItem(text = { Text(it) }, onClick = { onChange(it); expanded = false }) }
         }
     }
 }

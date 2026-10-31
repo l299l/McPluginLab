@@ -18,4 +18,4 @@ dependencyResolutionManagement {
     }
 }
 
-include("api", "core", "daemon", "gui", "cli")
+include("api", "core", "daemon", "gui", "mcp", "cli")

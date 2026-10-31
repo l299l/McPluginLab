@@ -27,10 +27,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mpl.api.InstanceInfo
+import dev.mpl.api.InstanceType
 
 @Composable
 fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier) {
-    val (proxies, servers) = state.projectInstances.partition { it.def.type.isProxy }
+    val proxies = state.projectInstances.filter { it.def.type.isProxy }
+    val bots = state.projectInstances.filter { it.def.type == InstanceType.SOULFIRE }
+    val servers = state.projectInstances - (proxies + bots).toSet()
     val project = state.project ?: return
 
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
@@ -50,6 +53,7 @@ fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier
             item { NavRow("Network", if (proxies.isEmpty()) "no proxy" else "velocity", state.page == AppState.ProjectPage.NETWORK) { state.page = AppState.ProjectPage.NETWORK } }
             section("Proxies", proxies, state)
             section("Servers", servers, state)
+            section("Bots", bots, state)
         }
         Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) { Text("Add server or proxy") }
     }
@@ -91,7 +95,8 @@ private fun InstanceRow(info: InstanceInfo, selected: Boolean, onClick: () -> Un
         Column {
             Text(info.def.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "${info.def.type.name.lowercase()} ${info.def.version}" + (info.def.port?.let { "  ·  :$it" } ?: ""),
+                info.def.bots?.let { "${it.accountNames.size} bots → ${it.target}" }
+                    ?: ("${info.def.type.name.lowercase()} ${info.def.version}" + (info.def.port?.let { "  ·  :$it" } ?: "")),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

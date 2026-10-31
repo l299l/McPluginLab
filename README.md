@@ -51,6 +51,30 @@ secret, `[servers]` from the project's Paper servers, `try` = lobby first) and t
 (ignoring `-sources`, `-javadoc`, `original-`) is copied into the target servers' `plugins/`, replacing older versions,
 and running targets are restarted. Auto-deploy polls every 2 s and deploys once the jar is stable.
 
+## Bots (SoulFire)
+
+```
+mpl create nbw/bots -t soulfire --target proxy --count 4 --prefix Bot     # or --jar ~/SoulFireCLI-2.10.6.jar
+mpl start nbw/bots --wait
+mpl bot nbw/bots -b Bot1 say /bw join --expect 'Bot1 issued server command: /bw join' --expect-in nbw/lobby
+mpl send nbw/lobby op Bot1 --expect 'Made Bot1'
+```
+
+Each bot instance runs SoulFire CLI with its own home folder (sessions, database) while the large runtime
+folders are shared with `~/.soulfire`. Accounts are offline names from prefix+count or `--accounts a,b,c`.
+The protocol version defaults to the target server's version (or the project's first server behind a proxy).
+`--expect` records the log position before sending, so fast responses are never missed, and skips the echoed command.
+
+## AI agents (MCP)
+
+```
+claude mcp add mpl -- /mnt/data/Codding/McPluginLab/cli/build/install/mpl/bin/mpl mcp
+```
+
+Tools: `list_projects`, `list_instances`, `create_instance`, `start`/`restart` (wait until ready), `stop`, `kill`,
+`send_command` and `bot_command` (with `expect`), `read_log` (cursor based), `wait_for_log`, `list_plugins`,
+`deploy_plugins`, `sync_network`, `list_files`, `read_file`, `write_file`.
+
 ## Locations
 
 | Path | Contents |
