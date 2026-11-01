@@ -81,8 +81,12 @@ class Mcp : ClientCommand("mcp", "Run an MCP server on stdio for AI agents (clau
     override suspend fun execute(client: MplClient) = McpServer(LabTools(client) { DaemonConnection.connect() }.all, System.`in`.bufferedReader(), System.out).run()
 }
 
-class Gui : ClientCommand("gui", "Open the McPluginLab window") {
-    override suspend fun execute(client: MplClient) = runGui(client)
+class Gui : CliktCommand("gui") {
+    override fun help(context: Context) = "Open the McPluginLab window"
+    override fun run() {
+        DaemonConnection.runFromRuntimeCopy("gui")?.let { exitProcess(it) }
+        runBlocking { DaemonConnection.connect().use { client -> runGui(client) } }
+    }
 }
 
 class ProjectList : ClientCommand("ls", "List projects") {
@@ -392,6 +396,7 @@ private fun InstanceInfo.describe() =
     "${def.id} (${def.type.name.lowercase()} ${def.version}${def.build?.let { " #$it" } ?: ""}, port ${def.port ?: "-"}): $state"
 
 fun main(args: Array<String>) {
+    DaemonConnection.markRuntimeInUse()
     try {
         Mpl().subcommands(
             DaemonCommand(), Shutdown(), Gui(), Mcp(),

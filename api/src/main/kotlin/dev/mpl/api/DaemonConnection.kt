@@ -8,6 +8,7 @@ import kotlin.io.path.Path
 import kotlin.io.path.copyTo
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createFile
+import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
@@ -21,6 +22,7 @@ object DaemonConnection {
     private val classpath: List<Path> by lazy { System.getProperty("java.class.path").split(File.pathSeparator).map { Path(it) } }
 
     val build: String by lazy {
+        System.getProperty("mpl.build")?.let { return@lazy it }
         val digest = MessageDigest.getInstance("SHA-256")
         classpath.filter { it.isRegularFile() }.forEach {
             digest.update("${it.fileName}:${it.fileSize()}:${it.getLastModifiedTime().toMillis()}".toByteArray())
@@ -42,6 +44,17 @@ object DaemonConnection {
         val java = ProcessHandle.current().info().command().orElse("java")
         return listOf(java, "--enable-native-access=ALL-UNNAMED", "-Dmpl.build=$build", "-cp", classpath, MAIN_CLASS, *args)
     }
+
+    fun runFromRuntimeCopy(vararg args: String): Int? {
+        if (runtimeDir() != null) return null
+        return ProcessBuilder(selfCommand(*args, classpath = runtimeClasspath())).inheritIO().start().waitFor()
+    }
+
+    fun markRuntimeInUse() {
+        runtimeDir()?.resolve(".pid-${ProcessHandle.current().pid()}")?.let { if (!it.exists()) it.createFile() }
+    }
+
+    private fun runtimeDir(): Path? = classpath.firstOrNull()?.parent?.takeIf { it.parent == MplHome.cache.resolve("runtime") }
 
     fun openInTerminal(id: InstanceId, terminal: String = System.getenv("MPL_TERMINAL") ?: "konsole") {
         ProcessBuilder(listOf("setsid", terminal, "-e") + selfCommand("attach", id.toString()))
@@ -76,6 +89,12 @@ object DaemonConnection {
         runtimes.listDirectoryEntries()
             .sortedByDescending { it.getLastModifiedTime() }
             .drop(KEPT_RUNTIMES)
+            .filterNot(::inUse)
             .forEach { it.toFile().deleteRecursively() }
+    }
+
+    private fun inUse(runtime: Path): Boolean = runtime.listDirectoryEntries(".pid-*").any { marker ->
+        val alive = marker.fileName.toString().removePrefix(".pid-").toLongOrNull()?.let { ProcessHandle.of(it).isPresent } == true
+        alive.also { if (!it) marker.deleteIfExists() }
     }
 }

@@ -1,115 +1,147 @@
-# McPluginLab (mpl)
+<div align="center">
 
-One place to run and test Minecraft plugins: servers, proxies, plugin auto-deploy, bots and a client launcher.
-A background daemon owns all processes; the CLI, GUI and MCP server are clients of it.
+# McPluginLab
 
-## Build
+**A workbench for testing Minecraft plugins.**
+Servers, proxies, plugin auto-deploy, bots and a game client in one app,
+driven from a desktop GUI, the command line or an AI agent.
 
-```
+![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)
+![Compose Desktop](https://img.shields.io/badge/Compose-Desktop-4285F4?logo=jetpackcompose&logoColor=white)
+![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)
+![MCP](https://img.shields.io/badge/MCP-ready-000000)
+
+![Project overview](docs/images/overview.png)
+
+</div>
+
+## Why
+
+Testing a plugin usually means juggling server folders, terminal windows, copied jars, proxy configs and a
+launcher, and repeating all of it whenever the version or the setup changes. McPluginLab (`mpl`) turns that into
+projects you start with one click:
+
+- **Servers in seconds.** Paper, Purpur, Folia, Spigot (BuildTools), checksum-verified and cached. The EULA,
+  offline mode and ports are set up for you.
+- **Proxies that configure themselves.** Velocity, Waterfall or BungeeCord, with the server list, forwarding mode
+  and secrets written on every start. Any server can be switched out of the network to run standalone.
+- **Live consoles.** Real terminals with colors, tab completion and scrollback, embedded in the app or popped
+  out into your own terminal. They keep running when the window closes.
+- **Plugin auto-deploy.** Point a link at `target/MyPlugin-*.jar`; every build is copied to the right servers,
+  old versions are removed and the servers restart.
+- **Bots and a real client.** SoulFire bots and a built-in offline Minecraft launcher join your network
+  automatically.
+- **The right Java, automatically.** Each instance runs on the Java version it needs; missing JDKs are
+  downloaded from Adoptium.
+- **Built for AI testing.** An MCP server lets agents like Claude Code start the network, send commands, drive
+  bots and wait for log lines, the same way you do.
+
+<table>
+<tr>
+<td><img src="docs/images/console.png" alt="Console"></td>
+<td><img src="docs/images/network.png" alt="Network"></td>
+</tr>
+<tr>
+<td align="center">Embedded console</td>
+<td align="center">Proxy network with standalone servers</td>
+</tr>
+<tr>
+<td><img src="docs/images/plugins.png" alt="Plugins"></td>
+<td><img src="docs/images/dialog.png" alt="New instance"></td>
+</tr>
+<tr>
+<td align="center">Linked plugins</td>
+<td align="center">Adding a server, proxy, bots or client</td>
+</tr>
+</table>
+
+## Quick start
+
+Requirements: Linux and a JDK 21 or newer to build and run `mpl`. Server JDKs are handled for you.
+
+```bash
+git clone <this repository> McPluginLab && cd McPluginLab
 ./gradlew installDist
 alias mpl=$PWD/cli/build/install/mpl/bin/mpl
+
+mpl gui
 ```
 
-The daemon runs from a copy of the jars, so rebuilding is safe; `mpl shutdown` restarts it on the new build.
+Or the same from the command line:
 
-## Usage
+```bash
+mpl project create skywars
+mpl create skywars/proxy -t velocity
+mpl create skywars/lobby -t paper -v 26.3
+mpl create skywars/game1 -t paper -v 26.3
+mpl create skywars/dev   -t paper -v 26.3 --standalone          # outside the proxy network
+mpl create skywars/bots  -t soulfire --target proxy --count 3
+mpl plugin add -P skywars SkyWars ~/SkyWars/target/SkyWars-*.jar
 
-```
-mpl gui                                   # projects home page, consoles, actions
-
-mpl project create nbw --dir /mnt/data/Codding/NewBedwars/Servers
-mpl create nbw/lobby --type paper --version 26.3 -p 25566
-mpl create nbw/proxy --type velocity -p 25577
-mpl start nbw/lobby nbw/proxy --wait
-mpl send nbw/lobby say hi
-mpl wait nbw/lobby 'joined the game' --timeout 60
-mpl logs nbw/lobby -f
-mpl attach nbw/lobby                      # Ctrl+] detaches
-mpl open nbw/lobby                        # console in a new terminal window (MPL_TERMINAL, default konsole)
-mpl stop nbw/lobby nbw/proxy
-mpl ls
-mpl project ls
-
-mpl plugin add -P nbw nbw ~/NewBedwars-Free/newbedwars-plugin/target/NewBedwars-*.jar -t lobby -t game1
-mpl plugin add -P nbw nbw-proxy ~/NewBedwars-Free/newbedwars-proxy/target/NewBedwars-Proxy-*.jar -t proxy
-mpl deploy -P nbw                         # deploy now; linked jars also deploy automatically when they change
-mpl network sync -P nbw                   # rewrite proxy/backend forwarding config
-mpl project set nbw --online-mode false
-mpl file cat nbw/lobby server.properties
-mpl file write nbw/lobby config/paper-global.yml < paper-global.yml
+mpl up skywars                                                  # proxy and servers, then the bots
+mpl bot skywars/bots -b Bot1 say /sw join --expect 'Bot1 issued server command' --expect-in skywars/lobby
+mpl attach skywars/lobby                                        # Ctrl+] detaches
+mpl down skywars
 ```
 
-Instances are addressed as `project/name`; `-P project` or `MPL_PROJECT` sets the project for bare names
-(default `default`). Creating a server accepts the Minecraft EULA and sets `online-mode=false` (use `--online` to keep it).
-Existing server directories can be imported with `--dir <path> --jar <file>`.
+Now run `mvn package` in your plugin: the new jar is deployed and the servers restart by themselves.
 
-**Networks:** when a project contains a Velocity proxy, every start writes `velocity.toml` (modern forwarding, a per-project
-secret, `[servers]` from the project's Paper servers, `try` = lobby first) and the backends' `paper-global.yml` and
-`server.properties`. Adding or removing a server while the proxy runs triggers `velocity reload`.
+## Let an AI agent test your plugin
 
-**Plugin links:** a link points at a jar, a glob like `target/MyPlugin-*.jar` or a folder. The newest matching jar
-(ignoring `-sources`, `-javadoc`, `original-`) is copied into the target servers' `plugins/`, replacing older versions,
-and running targets are restarted. Auto-deploy polls every 2 s and deploys once the jar is stable.
+```bash
+claude mcp add mpl -- /path/to/McPluginLab/cli/build/install/mpl/bin/mpl mcp
+```
 
-## Server software and Java
+The agent gets tools such as `start_project`, `deploy_plugins`, `send_command` and `bot_command` with `expect`,
+`wait_for_log` and `read_log` with cursors, so it can run a full test loop: build, deploy, join with bots,
+trigger the feature and check the server log. See [AI agents](docs/ai-agents.md).
 
-| Type | Source |
+## Documentation
+
+| | |
 |---|---|
-| `paper`, `folia`, `velocity`, `waterfall` | PaperMC Fill API (sha256 verified) |
-| `purpur` | Purpur API |
-| `spigot` | BuildTools, built once per version into the jar cache (takes a few minutes) |
-| `bungeecord` | md_5 Jenkins |
-| `soulfire` | GitHub releases, or `--jar` |
-| `client` | Mojang version manifest (built-in launcher) |
+| [Getting started](docs/getting-started.md) | Install, first project, a tour of the GUI |
+| [Networks](docs/networks.md) | Proxies, forwarding, standalone servers |
+| [Plugins](docs/plugins.md) | Linking build output and auto-deploy |
+| [Bots and clients](docs/bots-and-clients.md) | SoulFire bots and the built-in launcher |
+| [AI agents](docs/ai-agents.md) | The MCP server and an example test loop |
+| [CLI reference](docs/cli.md) | Every `mpl` command |
+| [Architecture](docs/architecture.md) | Daemon, clients, files and the HTTP API |
 
-Java is chosen per instance (`java: auto`): Paper-family servers use the Fill API minimum, other servers their
-Minecraft version (≤1.16 → 8, 1.17–1.20.4 → 17, 1.20.5+ → 21, 26.x → 25), proxies 21, SoulFire 25, clients Mojang's
-`javaVersion`. An exact installed match from `~/.jdks`, `/usr/lib/jvm`, sdkman or the cache is used; otherwise Temurin is
-downloaded from Adoptium. `mpl java` lists what is available.
+## How it works
 
-Networks work with every proxy: Velocity uses modern forwarding when all backends are Paper-based 1.13+, otherwise
-legacy forwarding with `bungeecord: true` in `spigot.yml`. BungeeCord/Waterfall get `servers`, `listeners` (priorities,
-`force_default_server`) and `ip_forward` written into `config.yml`.
+A small background daemon owns every process. The GUI, the CLI and the MCP server are thin clients that talk to
+it over a local HTTP and WebSocket API, so they all see the same live state. Servers keep running when you close
+the window, and you can watch a console in the app while an agent drives the same server through MCP.
 
-## Minecraft client
-
-```
-mpl create nbw/me -t client -v 26.3 --username Leon --target proxy
-mpl start nbw/me                          # downloads client, libraries, assets and Java, then joins the proxy
-```
-
-Clients are offline accounts with their own game folder per instance; versions, libraries and assets are shared in
-the cache. `options.txt` is set up for testing (no onboarding or multiplayer warning, no pause on focus loss).
-Stopping a client closes the game.
-
-## Bots (SoulFire)
-
-```
-mpl create nbw/bots -t soulfire --target proxy --count 4 --prefix Bot     # or --jar ~/SoulFireCLI-2.10.6.jar
-mpl start nbw/bots --expect 'Bot1 joined the game' --expect-in nbw/lobby
-mpl bot nbw/bots -b Bot1 say /bw join --expect 'Bot1 issued server command: /bw join' --expect-in nbw/lobby
-mpl send nbw/lobby op Bot1 --expect 'Made Bot1'
+```mermaid
+flowchart LR
+    GUI[Desktop GUI] --> D
+    CLI[mpl CLI] --> D
+    MCP[MCP server] --> D
+    D[mpl daemon] --> S[Servers and proxies]
+    D --> B[SoulFire bots]
+    D --> C[Minecraft client]
+    D --> P[Plugin watcher]
 ```
 
-Each bot instance runs SoulFire CLI with its own home folder (sessions, database) while the large runtime
-folders are shared with `~/.soulfire`. Accounts are offline names from prefix+count or `--accounts a,b,c`.
-The protocol version defaults to the target server's version (or the project's first server behind a proxy).
-`--expect` records the log position before sending, so fast responses are never missed, and skips the echoed command.
+## Supported software
 
-## AI agents (MCP)
+| Type | Versions from | Notes |
+|---|---|---|
+| Paper, Folia, Velocity, Waterfall | PaperMC API | sha256 verified |
+| Purpur | Purpur API | |
+| Spigot | BuildTools | built once per version, then cached |
+| BungeeCord | md_5 Jenkins | |
+| SoulFire | GitHub releases | or your own SoulFireCLI jar |
+| Minecraft client | Mojang manifest | offline accounts |
 
+## Building from source
+
+```bash
+./gradlew installDist   # build the mpl distribution
+./gradlew test          # run the tests
 ```
-claude mcp add mpl -- /mnt/data/Codding/McPluginLab/cli/build/install/mpl/bin/mpl mcp
-```
 
-Tools: `list_projects`, `list_instances`, `create_instance`, `start`/`restart` (wait until ready), `stop`, `kill`,
-`send_command` and `bot_command` (with `expect`), `read_log` (cursor based), `wait_for_log`, `list_plugins`,
-`deploy_plugins`, `sync_network`, `list_files`, `read_file`, `write_file`.
-
-## Locations
-
-| Path | Contents |
-|---|---|
-| `~/.local/share/mcpluginlab` (`MPL_HOME`) | projects, instance definitions, console logs, daemon info |
-| `~/.cache/mcpluginlab` (`MPL_CACHE`) | server jars, JDKs, Minecraft client files, daemon runtime copies |
-| project folder (chosen per project) | server directories, default `~/.local/share/mcpluginlab/servers/<project>` |
+Rebuilding while `mpl` runs is safe: the daemon and the GUI run from a private copy of the jars.
+Run `mpl shutdown` to restart the daemon on a new build. Running servers are stopped first.
