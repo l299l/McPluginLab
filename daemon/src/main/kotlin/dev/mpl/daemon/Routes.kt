@@ -6,12 +6,14 @@ import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.Event
 import dev.mpl.api.FileContent
+import dev.mpl.api.GroupRequest
 import dev.mpl.api.InstanceId
 import dev.mpl.api.LogPage
 import dev.mpl.api.MplJson
 import dev.mpl.api.Ok
 import dev.mpl.api.PluginLink
 import dev.mpl.api.TerminalSize
+import dev.mpl.api.UpdateInstanceRequest
 import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.api.VersionList
 import dev.mpl.api.WaitResult
@@ -107,6 +109,9 @@ fun Application.module(daemon: Daemon) {
                         daemon.lab.removeProject(call.parameters["project"]!!, call.request.queryParameters["deleteFiles"].toBoolean())
                         call.respond(Ok())
                     }
+                    groupRoute(daemon, "start", Lab::startGroup)
+                    groupRoute(daemon, "stop", Lab::stopGroup)
+                    groupRoute(daemon, "restart", Lab::restartGroup)
                     get("/instances") { call.respond(daemon.lab.list(call.parameters["project"]!!)) }
                     post("/instances") {
                         val request = call.receive<CreateInstanceRequest>().copy(project = call.parameters["project"]!!)
@@ -119,8 +124,17 @@ fun Application.module(daemon: Daemon) {
     }
 }
 
+private fun Route.groupRoute(daemon: Daemon, action: String, run: suspend Lab.(String, List<String>) -> List<*>) = post("/$action") {
+    val request = call.receive<GroupRequest>()
+    val project = call.project
+    if (request.wait) daemon.lab.run(project, request.instances)
+    else daemon.scope.launch { runCatching { daemon.lab.run(project, request.instances) } }
+    call.respond(daemon.lab.list(project))
+}
+
 private fun Route.instanceRoutes(lab: Lab) {
     get { call.respond(lab.info(call.instanceId)) }
+    patch { call.respond(lab.updateInstance(call.instanceId, call.receive<UpdateInstanceRequest>())) }
     delete {
         lab.remove(call.instanceId, call.request.queryParameters["deleteFiles"].toBoolean())
         call.respond(Ok())

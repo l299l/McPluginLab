@@ -8,9 +8,12 @@ import dev.mpl.api.InstanceInfo
 import dev.mpl.api.InstanceType
 import dev.mpl.api.LogLine
 import dev.mpl.api.MplClient
+import dev.mpl.api.MplException
 import dev.mpl.api.PluginStatus
+import dev.mpl.api.UpdateInstanceRequest
+import java.net.ConnectException
 
-class LabTools(private val client: MplClient) {
+class LabTools(private var client: MplClient, private val reconnect: suspend () -> MplClient = { client }) {
     val all: List<Tool> = listOf(
         tool("list_projects", "List projects with their folders and instance counts.") {
             client.projects().joinToString("\n") { "${it.def.name}: ${it.instances} instances, ${it.running} running, folder ${it.def.dir}, online-mode=${it.def.onlineMode}" }
@@ -61,6 +64,24 @@ class LabTools(private val client: MplClient) {
             string("expect_in", "project/name whose log to watch for expect (default: the instance)", required = false)
             integer("timeout_seconds", "Default 180")
         }) { args -> lifecycle(args, "restart") },
+
+        tool("start_project", "Start a whole project (or some instances of it) and wait: proxies and servers first, then bots and clients once the servers are ready.", {
+            string("project", "Project")
+            string("instances", "Comma separated instance names, default all", required = false)
+        }) { args -> group(args, "start") },
+
+        tool("stop_project", "Stop a whole project (or some instances of it) and wait: bots and clients first, then proxies, then servers.", {
+            string("project", "Project")
+            string("instances", "Comma separated instance names, default all", required = false)
+        }) { args -> group(args, "stop") },
+
+        tool("set_proxied", "Include a server in the project's proxy network or exclude it so it runs standalone (own port, no forwarding).", {
+            string("instance", "project/name of a server")
+            boolean("proxied", "true to include, false to exclude", required = true)
+        }) { args ->
+            val proxied = args.optString("proxied")?.toBooleanStrict() ?: throw IllegalArgumentException("Missing argument 'proxied'")
+            client.updateInstance(args.instance(), UpdateInstanceRequest(proxied = proxied)).let { "${it.describe()}, proxied=${it.def.proxied}" }
+        },
 
         tool("stop", "Stop an instance gracefully and wait until it exited.", {
             string("instance", "project/name")
@@ -143,7 +164,7 @@ class LabTools(private val client: MplClient) {
             client.writeFile(args.instance(), args.string("path"), args.string("content"))
             "Wrote ${args.string("path")}"
         },
-    )
+    ).map { tool -> tool.wrap(::reconnecting) }
 
     private suspend fun lifecycle(args: Args, action: String): String {
         val id = args.instance()
@@ -177,6 +198,21 @@ class LabTools(private val client: MplClient) {
     private suspend fun tail(id: InstanceId, since: Long): String =
         client.log(id, since, limit = 40).lines.joinToString("\n", transform = LogLine::text)
 
+    private suspend fun reconnecting(call: suspend () -> String): String = try {
+        call()
+    } catch (e: Exception) {
+        if (e !is ConnectException && (e as? MplException)?.message != "Invalid token") throw e
+        client = reconnect()
+        call()
+    }
+
+    private suspend fun group(args: Args, action: String): String {
+        val only = args.optString("instances")?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+        return client.group(args.string("project"), action, only, wait = true)
+            .filter { only.isEmpty() || it.def.name in only }
+            .joinToString("\n") { it.describe() }
+    }
+
     private fun Args.instance(): InstanceId {
         val value = string("instance")
         require('/' in value) { "Instance must be 'project/name', got '$value'" }
@@ -186,6 +222,7 @@ class LabTools(private val client: MplClient) {
     private fun InstanceInfo.describe() = buildString {
         append("${def.id}: ${def.type.name.lowercase()} ${def.version}, ${state.name.lowercase()}")
         def.port?.let { append(", port $it") }
+        if (def.type.isServer && !def.proxied) append(", standalone (not behind the proxy)")
         def.bots?.let { append(", bots ${it.accountNames.joinToString()} -> ${it.target}") }
         def.client?.let { append(", player ${it.username}" + (it.target?.let { target -> " -> $target" } ?: "")) }
         append(", log cursor $nextLogSeq")

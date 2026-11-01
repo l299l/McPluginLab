@@ -8,10 +8,12 @@ import dev.mpl.api.InstanceId
 import dev.mpl.api.InstanceInfo
 import dev.mpl.api.InstanceState
 import dev.mpl.api.InstanceType
+import dev.mpl.api.Network
 import dev.mpl.api.ProjectDef
 import dev.mpl.api.PluginLink
 import dev.mpl.api.PluginStatus
 import dev.mpl.api.ProjectInfo
+import dev.mpl.api.UpdateInstanceRequest
 import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.core.bots.SoulFire
 import dev.mpl.core.download.BungeeCordSource
@@ -38,10 +40,12 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -68,6 +72,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     }
     private val projects = ConcurrentHashMap<String, ProjectDef>()
     private val instances = ConcurrentHashMap<InstanceId, Instance>()
+    private val configLocks = ConcurrentHashMap<String, Any>()
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 256)
     val events: SharedFlow<Event> = _events.asSharedFlow()
 
@@ -143,9 +148,9 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     fun syncNetwork(project: String, reloadProxy: Boolean = true) {
         val defs = instanceDefs(project)
-        NetworkConfigurator.sync(project(project), defs)
-        val proxy = NetworkConfigurator.proxyOf(defs) ?: return
-        if (reloadProxy && isAlive(proxy.id)) sendCommand(proxy.id, "velocity reload")
+        synchronized(configLock(project)) { NetworkConfigurator.sync(project(project), defs) }
+        val proxy = Network.proxyOf(defs) ?: return
+        if (reloadProxy && isAlive(proxy.id)) sendCommand(proxy.id, NetworkConfigurator.reloadCommand(proxy))
     }
 
     fun instanceDefs(project: String): List<InstanceDef> = instances.values.map { it.def }.filter { it.project == project }
@@ -193,6 +198,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             port = if (req.type.isServer || req.type.isProxy) req.port ?: nextFreePort(req.type) else null,
             memory = req.memory ?: if (req.type.isProxy) "512M" else "2G",
             java = req.java ?: InstanceDef.AUTO_JAVA,
+            proxied = req.proxied,
         )
         val existingJar = req.jar
         def = if (req.type == InstanceType.SOULFIRE) {
@@ -231,6 +237,58 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
         syncNetwork(def.project)
         _events.emit(Event.InstancesChanged(def.project))
         info(id)
+    }
+
+    suspend fun updateInstance(id: InstanceId, req: UpdateInstanceRequest): InstanceInfo {
+        req.port?.let { port -> require(instances.values.none { it.def.id != id && it.def.port == port }) { "Port $port is already used" } }
+        val current = get(id)
+        val def = current.def.copy(
+            proxied = req.proxied ?: current.def.proxied,
+            port = req.port ?: current.def.port,
+            memory = req.memory ?: current.def.memory,
+            jvmArgs = req.jvmArgs ?: current.def.jvmArgs,
+        )
+        workspace.save(def)
+        instances[id] = Instance(def, current.process)
+        withContext(Dispatchers.IO) { syncNetwork(id.project) }
+        _events.emit(Event.InstancesChanged(id.project))
+        return info(id)
+    }
+
+    suspend fun startGroup(project: String, names: List<String>): List<InstanceInfo> {
+        val (late, early) = group(project, names).partition { it.def.type.isPlayer }
+        listOf(early, late).forEach { phase ->
+            coroutineScope {
+                phase.filter { !it.process.isAlive }.map { instance -> async { startAndAwaitReady(instance) } }.awaitAll()
+            }
+        }
+        return list(project)
+    }
+
+    suspend fun stopGroup(project: String, names: List<String>): List<InstanceInfo> {
+        val targets = group(project, names)
+        val phases = listOf(targets.filter { it.def.type.isPlayer }, targets.filter { it.def.type.isProxy }, targets.filter { !it.def.type.isPlayer && !it.def.type.isProxy })
+        phases.forEach { phase -> coroutineScope { phase.map { async { it.process.stop() } }.awaitAll() } }
+        return list(project)
+    }
+
+    suspend fun restartGroup(project: String, names: List<String>): List<InstanceInfo> {
+        stopGroup(project, names)
+        return startGroup(project, names)
+    }
+
+    private fun group(project: String, names: List<String>): List<Instance> {
+        project(project)
+        names.forEach { get(InstanceId(project, it)) }
+        return instances.values.filter { it.def.project == project && (names.isEmpty() || it.def.name in names) }
+    }
+
+    private suspend fun startAndAwaitReady(instance: Instance) {
+        runCatching { start(instance.def.id) }.onFailure {
+            note(instance.def.id, "start failed: ${it.message}")
+            return
+        }
+        withTimeoutOrNull(READY_TIMEOUT_MS) { instance.process.state.first { it != InstanceState.STARTING } }
     }
 
     suspend fun start(id: InstanceId): InstanceInfo = withContext(Dispatchers.IO) {
@@ -318,6 +376,8 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             .launchIn(scope)
     }
 
+    private fun configLock(project: String): Any = configLocks.computeIfAbsent(project) { Any() }
+
     private fun launchSpec(def: InstanceDef, java: String): LaunchSpec {
         val dir = Path(def.dir)
         if (def.type == InstanceType.SOULFIRE) return botLaunchSpec(def, java)
@@ -325,7 +385,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
         val portArgs = def.port?.let { port ->
             when (def.type) {
                 InstanceType.PAPER, InstanceType.FOLIA, InstanceType.PURPUR, InstanceType.SPIGOT -> {
-                    PropertiesFile.update(dir.resolve("server.properties"), mapOf("server-port" to port.toString()))
+                    synchronized(configLock(def.project)) { PropertiesFile.update(dir.resolve("server.properties"), mapOf("server-port" to port.toString())) }
                     emptyList()
                 }
                 InstanceType.VELOCITY -> listOf("--port", port.toString())
@@ -381,5 +441,6 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     private companion object {
         val NAME = Regex("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$")
         val USERNAME = Regex("^[A-Za-z0-9_]{3,16}$")
+        const val READY_TIMEOUT_MS = 5 * 60_000L
     }
 }

@@ -15,6 +15,8 @@ class Tool(
     private val params: List<Param>,
     val handler: suspend (Args) -> String,
 ) {
+    fun wrap(around: suspend (suspend () -> String) -> String) = Tool(name, description, params) { args -> around { handler(args) } }
+
     fun descriptor(): JsonObject = buildJsonObject {
         put("name", name)
         put("description", description)

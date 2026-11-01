@@ -1,20 +1,29 @@
 package dev.mpl.gui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -22,25 +31,27 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogWindow
-import androidx.compose.ui.window.rememberDialogState
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import dev.mpl.api.BotSettings
 import dev.mpl.api.ClientSettings
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
+import dev.mpl.api.InstanceType
 import dev.mpl.api.MplHome
 import dev.mpl.api.PluginLink
-import dev.mpl.api.InstanceType
 import kotlinx.coroutines.launch
 
 @Composable
@@ -49,7 +60,7 @@ fun CreateProjectDialog(state: AppState, onClose: () -> Unit) {
     var dir by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    MplDialog("New project", onClose, height = 330) {
+    MplDialog("New project", onClose) {
         OutlinedTextField(name, { name = it.trim() }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
@@ -62,7 +73,6 @@ fun CreateProjectDialog(state: AppState, onClose: () -> Unit) {
             Spacer(Modifier.size(8.dp))
             OutlinedButton(onClick = { scope.launch { FilePicker.folder(dir.ifBlank { null })?.let { dir = it } } }) { Text("Browse") }
         }
-        Spacer(Modifier.weight(1f))
         DialogButtons(confirm = "Create", enabled = name.isNotBlank() && !state.isBusy(name), onCancel = onClose) {
             state.createProject(CreateProjectRequest(name, dir.ifBlank { null }), onDone = onClose)
         }
@@ -79,6 +89,8 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
     var memory by remember { mutableStateOf("") }
     var acceptEula by remember { mutableStateOf(true) }
     var offline by remember { mutableStateOf(true) }
+    var proxied by remember { mutableStateOf(true) }
+    val hasProxy = state.projectInstances.any { it.def.type.isProxy }
     var submitted by remember { mutableStateOf(false) }
     val targets = state.projectInstances.map { it.def }.filter { it.type != InstanceType.SOULFIRE }
     var target by remember { mutableStateOf(targets.firstOrNull { it.type.isProxy }?.name ?: targets.firstOrNull()?.name.orEmpty()) }
@@ -102,13 +114,16 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
         else -> version.isNotBlank() && (type.isProxy || acceptEula)
     }
 
-    MplDialog("New instance in $project", onClose, height = 600) {
+    MplDialog("New instance in $project", onClose, width = 620) {
         OutlinedTextField(name, { name = it.trim() }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CREATABLE.forEach {
-                FilterChip(selected = type == it, onClick = { type = it }, label = { Text(it.name.lowercase()) })
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { TYPE_GROUPS.forEach { (group, types) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(group, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(72.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    types.forEach { FilterChip(selected = type == it, onClick = { type = it }, label = { Text(TYPE_LABELS[it] ?: it.name.lowercase()) }) }
+                }
             }
-        }
+        } }
         if (client) {
             VersionField(version, versions, onChange = { version = it })
             OutlinedTextField(username, { username = it.trim() }, label = { Text("Player name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -132,12 +147,12 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
                 OutlinedTextField(port, { port = it.filter(Char::isDigit) }, label = { Text("Port (auto)") }, singleLine = true, modifier = Modifier.weight(1f))
                 OutlinedTextField(memory, { memory = it.trim() }, label = { Text(if (type.isProxy) "Memory (512M)" else "Memory (2G)") }, singleLine = true, modifier = Modifier.weight(1f))
             }
-            if (type.isServer) {
+            if (type.isServer) Column {
                 CheckRow("Accept the Minecraft EULA (aka.ms/MinecraftEULA)", acceptEula) { acceptEula = it }
                 CheckRow("Offline mode (online-mode=false)", offline) { offline = it }
+                if (hasProxy) CheckRow("Behind the project's proxy (off: standalone server with its own port)", proxied) { proxied = it }
             }
         }
-        Spacer(Modifier.weight(1f))
         DialogButtons(confirm = if (creating) "Downloading…" else "Create", enabled = canCreate, onCancel = onClose) {
             submitted = true
             val request = CreateInstanceRequest(
@@ -152,28 +167,44 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
                 offlineMode = offline && type.isServer,
                 bots = if (bots) BotSettings(target, count.toInt(), prefix.ifBlank { "Bot" }) else null,
                 client = if (client) ClientSettings(username, target.ifBlank { null }) else null,
+                proxied = proxied,
             )
             state.createInstance(request, onDone = onClose)
         }
     }
 }
 
-private val CREATABLE = InstanceType.entries.filter { it.software != null }
+private val TYPE_GROUPS = listOf(
+    "Server" to listOf(InstanceType.PAPER, InstanceType.PURPUR, InstanceType.FOLIA, InstanceType.SPIGOT),
+    "Proxy" to listOf(InstanceType.VELOCITY, InstanceType.WATERFALL, InstanceType.BUNGEECORD),
+    "Player" to listOf(InstanceType.SOULFIRE, InstanceType.CLIENT),
+)
+private val TYPE_LABELS = mapOf(InstanceType.SOULFIRE to "soulfire bots", InstanceType.CLIENT to "minecraft client")
 private const val NO_TARGET = "main menu"
 
 @Composable
-private fun ChoiceField(label: String, value: String, choices: List<String>, onChange: (String) -> Unit) {
+private fun ChoiceField(label: String, value: String, choices: List<String>, onChange: (String) -> Unit) =
+    DropdownField(label, value, choices, editable = false, onChange = onChange)
+
+@Composable
+private fun VersionField(version: String, versions: List<String>, onChange: (String) -> Unit) =
+    DropdownField("Version", version, versions.take(60), editable = true, onChange = onChange)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DropdownField(label: String, value: String, choices: List<String>, editable: Boolean, onChange: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
+    ExposedDropdownMenuBox(expanded, onExpandedChange = { expanded = it }) {
+        val anchor = if (editable) ExposedDropdownMenuAnchorType.PrimaryEditable else ExposedDropdownMenuAnchorType.PrimaryNotEditable
         OutlinedTextField(
-            value, {},
-            readOnly = true,
+            value, onChange,
+            readOnly = !editable,
             label = { Text(label) },
             singleLine = true,
-            trailingIcon = { TextButton(onClick = { expanded = true }) { Text("▾") } },
-            modifier = Modifier.fillMaxWidth(),
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded, Modifier.menuAnchor(ExposedDropdownMenuAnchorType.SecondaryEditable)) },
+            modifier = Modifier.menuAnchor(anchor).fillMaxWidth(),
         )
-        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+        ExposedDropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 260.dp)) {
             choices.forEach { DropdownMenuItem(text = { Text(it) }, onClick = { onChange(it); expanded = false }) }
         }
     }
@@ -182,30 +213,10 @@ private fun ChoiceField(label: String, value: String, choices: List<String>, onC
 @Composable
 fun RemoveDialog(title: String, detail: String?, deleteLabel: String, onClose: () -> Unit, onConfirm: (deleteFiles: Boolean) -> Unit) {
     var deleteFiles by remember { mutableStateOf(false) }
-    MplDialog(title, onClose, height = 250) {
+    MplDialog(title, onClose, width = 480) {
         detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         CheckRow(deleteLabel, deleteFiles) { deleteFiles = it }
-        Spacer(Modifier.weight(1f))
         DialogButtons(confirm = "Remove", enabled = true, onCancel = onClose) { onConfirm(deleteFiles) }
-    }
-}
-
-@Composable
-private fun VersionField(version: String, versions: List<String>, onChange: (String) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        OutlinedTextField(
-            version, onChange,
-            label = { Text("Version") },
-            singleLine = true,
-            trailingIcon = { TextButton(onClick = { expanded = true }) { Text("▾") } },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-            versions.take(40).forEach {
-                DropdownMenuItem(text = { Text(it) }, onClick = { onChange(it); expanded = false })
-            }
-        }
     }
 }
 
@@ -218,7 +229,7 @@ fun LinkPluginDialog(state: AppState, onClose: () -> Unit) {
     var restart by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
-    MplDialog("Link plugin", onClose, height = 560) {
+    MplDialog("Link plugin", onClose) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 source, { source = it },
@@ -238,18 +249,21 @@ fun LinkPluginDialog(state: AppState, onClose: () -> Unit) {
             }) { Text("Browse") }
         }
         OutlinedTextField(name, { name = it.trim() }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Text("Targets (none selected = all servers)", style = MaterialTheme.typography.labelLarge)
-        Column {
-            state.projectInstances.forEach { instance ->
+        Text("Deploy to (none selected = all servers)", style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            state.projectInstances.filter { it.def.type.isServer || it.def.type.isProxy }.forEach { instance ->
                 val target = instance.def.name
-                CheckRow("$target (${instance.def.type.name.lowercase()})", target in targets) { checked ->
-                    targets = if (checked) targets + target else targets - target
-                }
+                FilterChip(
+                    selected = target in targets,
+                    onClick = { targets = if (target in targets) targets - target else targets + target },
+                    label = { Text("$target · ${instance.def.type.name.lowercase()}") },
+                )
             }
         }
-        CheckRow("Deploy automatically when the jar changes", autoDeploy) { autoDeploy = it }
-        CheckRow("Restart running servers after deploying", restart) { restart = it }
-        Spacer(Modifier.weight(1f))
+        Column {
+            CheckRow("Deploy automatically when the jar changes", autoDeploy) { autoDeploy = it }
+            CheckRow("Restart running servers after deploying", restart) { restart = it }
+        }
         DialogButtons(confirm = "Link", enabled = name.isNotBlank() && source.isNotBlank(), onCancel = onClose) {
             state.savePlugin(PluginLink(name, source, targets.toList(), autoDeploy, restart), onDone = onClose)
         }
@@ -263,33 +277,36 @@ private fun versionGlob(path: String): String {
 }
 
 @Composable
-private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked, onChange)
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-@Composable
 private fun DialogButtons(confirm: String, enabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
         TextButton(onClick = onCancel) { Text("Cancel") }
         Spacer(Modifier.size(8.dp))
         Button(onClick = onConfirm, enabled = enabled) { Text(confirm) }
     }
 }
 
+val openDialogs = mutableIntStateOf(0)
+
 @Composable
-private fun MplDialog(title: String, onClose: () -> Unit, height: Int, content: @Composable ColumnScope.() -> Unit) {
-    DialogWindow(onCloseRequest = onClose, title = title, state = rememberDialogState(size = DpSize(480.dp, height.dp))) {
-        MplTheme {
-            Column(
-                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                content()
-            }
+private fun MplDialog(title: String, onClose: () -> Unit, width: Int = 560, content: @Composable ColumnScope.() -> Unit) {
+    DisposableEffect(Unit) {
+        openDialogs.intValue++
+        onDispose { openDialogs.intValue-- }
+    }
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(dismissOnClickOutside = false, usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .width(width.dp)
+                .heightIn(max = 760.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleLarge)
+            content()
         }
     }
 }

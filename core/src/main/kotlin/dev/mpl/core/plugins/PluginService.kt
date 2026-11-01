@@ -98,10 +98,10 @@ class PluginService(private val lab: Lab, private val scope: CoroutineScope) {
             val path = Path(source.replaceFirst(Regex("^~"), System.getProperty("user.home")))
             val (dir, pattern) = when {
                 path.isDirectory() -> path to Regex(""".*\.jar""")
-                '*' in path.name -> path.parent to globRegex(path.name)
+                '*' in path.name -> path.toAbsolutePath().parent to globRegex(path.name)
                 else -> return path.takeIf { it.exists() }
             }
-            if (dir == null || !dir.isDirectory()) return null
+            if (!dir.isDirectory()) return null
             return dir.listDirectoryEntries()
                 .filter { pattern.matches(it.name) && !IGNORED.containsMatchIn(it.name) }
                 .maxByOrNull { it.getLastModifiedTime() }

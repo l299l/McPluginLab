@@ -89,7 +89,11 @@ class DaemonTtyConnector(private val client: MplClient, private val id: Instance
 
         override fun read(b: ByteArray, off: Int, len: Int): Int {
             while (position >= current.size) {
-                current = queue.take()
+                current = try {
+                    queue.take()
+                } catch (_: InterruptedException) {
+                    return -1
+                }
                 position = 0
                 if (current === END_OF_STREAM) return -1
             }

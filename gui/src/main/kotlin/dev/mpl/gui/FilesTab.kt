@@ -36,8 +36,8 @@ import androidx.compose.ui.unit.dp
 import dev.mpl.api.FileEntry
 import dev.mpl.api.InstanceId
 import dev.mpl.gui.editor.ConfigEditor
-import kotlinx.coroutines.launch
 import javax.swing.SwingUtilities
+import kotlinx.coroutines.launch
 
 @Composable
 fun FilesTab(state: AppState, id: InstanceId) {
@@ -107,7 +107,7 @@ fun FilesTab(state: AppState, id: InstanceId) {
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
-            if (path != null) SwingPanel(factory = { editor.component }, modifier = Modifier.fillMaxSize())
+            if (path != null && openDialogs.intValue == 0) SwingPanel(factory = { editor.component }, modifier = Modifier.fillMaxSize())
         }
     }
 }

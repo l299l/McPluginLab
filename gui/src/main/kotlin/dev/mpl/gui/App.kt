@@ -40,6 +40,7 @@ private fun ProjectScreen(state: AppState, project: String) {
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Box(Modifier.weight(1f).fillMaxHeight()) {
             when (state.page) {
+                AppState.ProjectPage.OVERVIEW -> OverviewPage(state)
                 AppState.ProjectPage.PLUGINS -> PluginsPage(state)
                 AppState.ProjectPage.NETWORK -> NetworkPage(state)
                 AppState.ProjectPage.INSTANCE -> state.selectedInstance?.let { InstancePane(state, it) } ?: EmptyState()

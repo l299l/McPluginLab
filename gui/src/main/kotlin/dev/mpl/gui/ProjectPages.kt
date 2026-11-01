@@ -1,19 +1,10 @@
 package dev.mpl.gui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -27,10 +18,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.mpl.api.InstanceType
+import dev.mpl.api.Network
 import dev.mpl.api.PluginStatus
 import java.text.DateFormat
 import java.util.Date
@@ -79,10 +71,11 @@ private fun PluginCard(state: AppState, status: PluginStatus) {
 fun NetworkPage(state: AppState) {
     val project = state.project ?: return
     val instances = state.projectInstances.map { it.def }
-    val proxy = instances.firstOrNull { it.type == InstanceType.VELOCITY }
-    val backends = instances.filter { it.type == InstanceType.PAPER || it.type == InstanceType.FOLIA }.sortedBy { it.name }
+    val proxy = Network.proxyOf(instances)
+    val backends = Network.backendsOf(instances)
+    val servers = instances.filter { it.type.isServer }.sortedWith(compareBy({ it !in backends }, { backends.indexOf(it) }, { it.name }))
 
-    Page("Network", "With a Velocity proxy in the project, forwarding and the server list are configured on every start.", action = {
+    Page("Network", "With a proxy in the project, forwarding and the server list are written before every start.", action = {
         Button(onClick = { state.syncNetwork(project.def.name) }, enabled = proxy != null) { Text("Sync now") }
     }) {
         Card {
@@ -100,46 +93,38 @@ fun NetworkPage(state: AppState) {
         }
         Card {
             if (proxy == null) {
-                Text("No Velocity proxy in this project. Add one to build a network.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Text("${proxy.name}  ·  port ${proxy.port}  ·  modern forwarding", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.size(8.dp))
-                backends.sortedByDescending { it.name.contains("lobby", ignoreCase = true) }.forEachIndexed { index, server ->
-                    Detail(server.name, "127.0.0.1:${server.port}" + if (index == 0) "  (join server)" else "")
+                Text("No proxy in this project. Add a Velocity, Waterfall or BungeeCord instance to build a network.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                return@Card
+            }
+            val forwarding = if (Network.usesModernForwarding(proxy, backends)) "modern forwarding" else "legacy (BungeeCord) forwarding"
+            Text("${proxy.name}  ·  ${proxy.type.name.lowercase()} on port ${proxy.port}  ·  $forwarding", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.size(8.dp))
+            if (servers.isEmpty()) Text("No servers yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            servers.forEach { server ->
+                val id = server.id
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(server.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(160.dp))
+                    Text(
+                        "127.0.0.1:${server.port}" + when {
+                            server == backends.firstOrNull() -> "  ·  join server"
+                            server !in backends -> "  ·  standalone, join it directly"
+                            else -> ""
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("Behind proxy", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    Switch(server.proxied, { state.setProxied(id, it) }, enabled = !state.isBusy(id), modifier = Modifier.scale(0.75f))
                 }
-                if (backends.isEmpty()) Text("No backend servers yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Spacer(Modifier.size(4.dp))
+            Text(
+                "Players join the first server behind the proxy (one named *lobby* comes first). Changes apply to running proxies right away; restart backends to pick up forwarding changes.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
-}
-
-@Composable
-private fun Page(title: String, subtitle: String, action: @Composable () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            action()
-        }
-        Spacer(Modifier.size(4.dp))
-        content()
-    }
-}
-
-@Composable
-private fun Card(content: @Composable ColumnScope.() -> Unit) = Column(
-    Modifier
-        .fillMaxWidth()
-        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
-        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-        .padding(16.dp),
-    content = content,
-)
-
-@Composable
-private fun Detail(label: String, value: String) = Row(Modifier.padding(vertical = 2.dp)) {
-    Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(width = 120.dp, height = 18.dp))
-    Text(value, style = MaterialTheme.typography.bodySmall)
 }

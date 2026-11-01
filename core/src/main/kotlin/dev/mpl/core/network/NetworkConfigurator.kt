@@ -2,6 +2,10 @@ package dev.mpl.core.network
 
 import dev.mpl.api.InstanceDef
 import dev.mpl.api.InstanceType
+import dev.mpl.api.Network.atLeast
+import dev.mpl.api.Network.backendsOf
+import dev.mpl.api.Network.proxyOf
+import dev.mpl.api.Network.usesModernForwarding
 import dev.mpl.api.ProjectDef
 import dev.mpl.core.util.PropertiesFile
 import dev.mpl.core.util.TomlPatch
@@ -15,21 +19,18 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 object NetworkConfigurator {
-    fun proxyOf(instances: List<InstanceDef>): InstanceDef? = instances.firstOrNull { it.type.isProxy }
-
-    fun backendsOf(instances: List<InstanceDef>): List<InstanceDef> =
-        instances.filter { it.type.isServer }.sortedByDescending { it.name.contains("lobby", ignoreCase = true) }
-
-    fun usesModernForwarding(proxy: InstanceDef, backends: List<InstanceDef>): Boolean =
-        proxy.type == InstanceType.VELOCITY && backends.all { it.type.isPaperBased && atLeast(it.version, 13) }
-
     fun sync(project: ProjectDef, instances: List<InstanceDef>) {
-        val proxy = proxyOf(instances) ?: return
-        val backends = backendsOf(instances)
-        val modern = usesModernForwarding(proxy, backends)
-        if (proxy.type == InstanceType.VELOCITY) configureVelocity(project, proxy, backends, modern) else configureBungee(project, proxy, backends)
-        backends.forEach { configureBackend(project, it, modern) }
+        val proxy = proxyOf(instances)
+        val backends = if (proxy == null) emptyList() else backendsOf(instances)
+        if (proxy != null) {
+            val modern = usesModernForwarding(proxy, backends)
+            if (proxy.type == InstanceType.VELOCITY) configureVelocity(project, proxy, backends, modern) else configureBungee(project, proxy, backends)
+            backends.forEach { configureBackend(project, it, modern) }
+        }
+        instances.filter { it.type.isServer && it !in backends }.forEach(::configureStandalone)
     }
+
+    fun reloadCommand(proxy: InstanceDef): String = if (proxy.type == InstanceType.VELOCITY) "velocity reload" else "greload"
 
     private fun configureVelocity(project: ProjectDef, proxy: InstanceDef, backends: List<InstanceDef>, modern: Boolean) {
         val dir = Path(proxy.dir)
@@ -92,15 +93,16 @@ object NetworkConfigurator {
         }
     }
 
+    private fun configureStandalone(server: InstanceDef) {
+        val dir = Path(server.dir)
+        if (dir.resolve("spigot.yml").exists()) patchYaml(dir.resolve("spigot.yml"), listOf("settings", "bungeecord"), "false")
+        val paperGlobal = dir.resolve("config").resolve("paper-global.yml")
+        if (server.type.isPaperBased && paperGlobal.exists()) patchYaml(paperGlobal, listOf("proxies", "velocity", "enabled"), "false")
+    }
+
     private fun patchYaml(file: Path, path: List<String>, value: String) {
         val text = if (file.exists()) file.readText() else ""
         file.writeText(YamlPatch.set(text, path, value).trimStart('\n'))
-    }
-
-    private fun atLeast(version: String, minor: Int): Boolean {
-        val parts = version.split('.', '-').mapNotNull { it.toIntOrNull() }
-        val major = parts.getOrNull(0) ?: return true
-        return major > 1 || (parts.getOrNull(1) ?: 0) >= minor
     }
 
     private fun bundledResource(jar: Path, name: String): String = ZipFile(jar.toFile()).use { zip ->

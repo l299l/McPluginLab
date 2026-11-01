@@ -80,6 +80,15 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
     suspend fun deploy(project: String, plugin: String? = null): List<PluginStatus> =
         http.post("/api/projects/$project/deploy") { auth(); plugin?.let { parameter("plugin", it) } }.parse()
 
+    suspend fun group(project: String, action: String, instances: List<String> = emptyList(), wait: Boolean = false): List<InstanceInfo> =
+        http.post("/api/projects/$project/$action") {
+            auth(); contentType(ContentType.Application.Json); setBody(GroupRequest(instances, wait))
+        }.parse()
+
+    suspend fun updateInstance(id: InstanceId, req: UpdateInstanceRequest): InstanceInfo = http.patch(path(id)) {
+        auth(); contentType(ContentType.Application.Json); setBody(req)
+    }.parse()
+
     suspend fun syncNetwork(project: String): Ok = http.post("/api/projects/$project/network/sync") { auth() }.parse()
 
     suspend fun files(id: InstanceId, path: String = ""): List<FileEntry> =

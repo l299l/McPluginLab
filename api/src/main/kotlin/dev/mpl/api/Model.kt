@@ -21,12 +21,12 @@ enum class InstanceType(val software: String?, val role: Role) {
     val isServer: Boolean get() = role == Role.SERVER
     val isProxy: Boolean get() = role == Role.PROXY
     val isPaperBased: Boolean get() = this == PAPER || this == FOLIA || this == PURPUR
+    val isPlayer: Boolean get() = role == Role.BOTS || role == Role.CLIENT
 
     val defaultStopCommand: String
         get() = when (role) {
             Role.PROXY -> "end"
-            Role.BOTS -> "quit"
-            Role.CLIENT -> ""
+            Role.BOTS, Role.CLIENT -> ""
             else -> "stop"
         }
 
@@ -82,6 +82,17 @@ data class PluginStatus(
 data class UpdateProjectRequest(val onlineMode: Boolean? = null)
 
 @Serializable
+data class UpdateInstanceRequest(
+    val proxied: Boolean? = null,
+    val port: Int? = null,
+    val memory: String? = null,
+    val jvmArgs: List<String>? = null,
+)
+
+@Serializable
+data class GroupRequest(val instances: List<String> = emptyList(), val wait: Boolean = false)
+
+@Serializable
 data class FileEntry(val path: String, val directory: Boolean, val size: Long)
 
 @Serializable
@@ -117,6 +128,7 @@ data class InstanceDef(
     val env: Map<String, String> = emptyMap(),
     val bots: BotSettings? = null,
     val client: ClientSettings? = null,
+    val proxied: Boolean = true,
 ) {
     val id: InstanceId get() = InstanceId(project, name)
     val effectiveStopCommand: String get() = stopCommand ?: type.defaultStopCommand
@@ -172,6 +184,7 @@ data class CreateInstanceRequest(
     val offlineMode: Boolean = false,
     val bots: BotSettings? = null,
     val client: ClientSettings? = null,
+    val proxied: Boolean = true,
 )
 
 @Serializable data class CommandRequest(val command: String)

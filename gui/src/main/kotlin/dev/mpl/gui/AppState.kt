@@ -7,15 +7,16 @@ import androidx.compose.runtime.setValue
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
 import dev.mpl.api.DaemonConnection
+import dev.mpl.api.FileEntry
 import dev.mpl.api.InstanceId
 import dev.mpl.api.InstanceInfo
-import dev.mpl.api.FileEntry
 import dev.mpl.api.MplClient
 import dev.mpl.api.MplException
 import dev.mpl.api.PluginLink
 import dev.mpl.api.PluginStatus
-import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.api.ProjectInfo
+import dev.mpl.api.UpdateInstanceRequest
+import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.gui.terminal.ConsoleTerminal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +32,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
         private set
     var openProject by mutableStateOf<String?>(null)
     var selected by mutableStateOf<InstanceId?>(null)
-    var page by mutableStateOf(ProjectPage.INSTANCE)
+    var page by mutableStateOf(ProjectPage.OVERVIEW)
     var plugins by mutableStateOf<List<PluginStatus>>(emptyList())
         private set
     var busy by mutableStateOf<Set<String>>(emptySet())
@@ -51,7 +52,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
 
     fun open(project: String) {
         openProject = project
-        page = ProjectPage.INSTANCE
+        page = ProjectPage.OVERVIEW
         selected = projectInstances.firstOrNull()?.def?.id
         launchFor(project) {}
     }
@@ -71,6 +72,13 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
     fun deploy(name: String?) = launchFor("plugin:${name ?: "*"}") {
         client.deploy(openProject!!, name).firstOrNull { it.error != null }?.let { throw MplException(it.error!!) }
     }
+
+    fun group(action: String, names: List<String> = emptyList()) {
+        val project = openProject ?: return
+        launchFor("group:$project") { client.group(project, action, names) }
+    }
+
+    fun setProxied(id: InstanceId, proxied: Boolean) = launchFor(id.toString()) { client.updateInstance(id, UpdateInstanceRequest(proxied = proxied)) }
 
     fun setOnlineMode(project: String, online: Boolean) = launchFor(project) { client.updateProject(project, UpdateProjectRequest(online)) }
 
@@ -123,7 +131,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
         emptyList()
     }
 
-    enum class ProjectPage { INSTANCE, PLUGINS, NETWORK }
+    enum class ProjectPage { OVERVIEW, INSTANCE, PLUGINS, NETWORK }
 
     fun isBusy(key: Any) = key.toString() in busy
 

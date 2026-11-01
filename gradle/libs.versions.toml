@@ -8,6 +8,7 @@ pty4j = "0.14.0"
 clikt = "5.1.0"
 slf4j = "2.0.20"
 compose = "1.12.2"
+material3 = "1.9.0"
 jediterm = "3.76"
 rsyntaxtextarea = "4.0.1"
 
@@ -30,6 +31,7 @@ ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negoti
 ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
 jediterm-core = { module = "org.jetbrains.jediterm:jediterm-core", version.ref = "jediterm" }
 jediterm-ui = { module = "org.jetbrains.jediterm:jediterm-ui", version.ref = "jediterm" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "material3" }
 rsyntaxtextarea = { module = "com.fifesoft:rsyntaxtextarea", version.ref = "rsyntaxtextarea" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 

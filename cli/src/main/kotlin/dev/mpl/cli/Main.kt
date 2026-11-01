@@ -28,6 +28,7 @@ import dev.mpl.api.InstanceType
 import dev.mpl.api.MplClient
 import dev.mpl.api.MplException
 import dev.mpl.api.PluginLink
+import dev.mpl.api.UpdateInstanceRequest
 import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.daemon.Daemon
 import dev.mpl.gui.runGui
@@ -77,7 +78,7 @@ class Shutdown : ClientCommand("shutdown", "Stop all instances and the daemon") 
 }
 
 class Mcp : ClientCommand("mcp", "Run an MCP server on stdio for AI agents (claude mcp add mpl -- mpl mcp)") {
-    override suspend fun execute(client: MplClient) = McpServer(LabTools(client).all, System.`in`.bufferedReader(), System.out).run()
+    override suspend fun execute(client: MplClient) = McpServer(LabTools(client) { DaemonConnection.connect() }.all, System.`in`.bufferedReader(), System.out).run()
 }
 
 class Gui : ClientCommand("gui", "Open the McPluginLab window") {
@@ -222,6 +223,7 @@ class Create : ClientCommand("create", "Create an instance, downloading the serv
     private val memory by option("-m", "--memory")
     private val java by option("--java", help = "Java executable")
     private val online by option("--online", help = "Keep online-mode=true").flag()
+    private val standalone by option("--standalone", help = "Keep this server out of the project's proxy network").flag()
     private val target by option("--target", help = "Bots/client: instance to connect to (proxy or server)")
     private val username by option("--username", help = "Client: offline player name")
     private val count by option("--count", help = "Bots: number of bots").int().default(1)
@@ -236,7 +238,7 @@ class Create : ClientCommand("create", "Create an instance, downloading the serv
         val player = if (type == InstanceType.CLIENT) ClientSettings(username ?: id.name, target) else null
         val request = CreateInstanceRequest(
             project = id.project, name = id.name, type = type, version = version, build = build, dir = dir,
-            port = port, memory = memory, java = java, jar = jar, acceptEula = true, offlineMode = !online, bots = bots, client = player,
+            port = port, memory = memory, java = java, jar = jar, acceptEula = true, offlineMode = !online, bots = bots, client = player, proxied = !standalone,
         )
         val info = client.create(request)
         echo("Created ${info.describe()} in ${info.def.dir}")
@@ -276,6 +278,31 @@ open class ActionCommand(private val action: String, help: String) : ClientComma
                 echo(result.line!!.text)
             }
         }
+    }
+}
+
+open class ProjectActionCommand(name: String, private val action: String, help: String) : ClientCommand(name, help) {
+    private val name by argument(help = "Project")
+    private val only by argument(help = "Only these instances (default: all)").multiple()
+    private val noWait by option("--no-wait", help = "Return immediately").flag()
+
+    override suspend fun execute(client: MplClient) {
+        client.group(name, action, only, wait = !noWait)
+            .forEach { if (only.isEmpty() || it.def.name in only) echo(it.describe()) }
+    }
+}
+
+class Up : ProjectActionCommand("up", "start", "Start a project: proxies and servers first, bots and clients once those are ready")
+class Down : ProjectActionCommand("down", "stop", "Stop a project: bots and clients first, then proxies, then servers")
+
+class SetInstance : ClientCommand("set", "Change instance settings") {
+    private val name by argument(help = "[project/]name")
+    private val proxied by option("--proxied", help = "Include the server in the project's proxy network (true/false)").boolean()
+    private val port by option("-p", "--port").int()
+    private val memory by option("-m", "--memory")
+    override suspend fun execute(client: MplClient) {
+        val info = client.updateInstance(ref(name), UpdateInstanceRequest(proxied, port, memory))
+        echo("${info.describe()}  memory=${info.def.memory}  proxied=${info.def.proxied}")
     }
 }
 
@@ -372,7 +399,7 @@ fun main(args: Array<String>) {
             Deploy(),
             GroupCommand("network", "Proxy network configuration (use -P project)").subcommands(NetworkSync()),
             GroupCommand("file", "Read and write instance files").subcommands(FileList(), FileRead(), FileWrite()),
-            ListInstances(), Versions(), JavaList(), Create(), Remove(),
+            ListInstances(), Versions(), JavaList(), Create(), Remove(), SetInstance(), Up(), Down(),
             Start(), Stop(), Restart(), Kill(), Send(), Bot(), Logs(), Wait(), Attach(), Open(),
         ).main(args)
     } catch (e: MplException) {
