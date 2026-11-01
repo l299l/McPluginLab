@@ -8,10 +8,14 @@
 Servers, proxies, plugin auto-deploy, bots and a game client in one app,
 driven from a desktop GUI, the command line or an AI agent.
 
+[![Release](https://img.shields.io/github/v/release/l299l/mcpluginlab?color=7DD3A0)](https://github.com/l299l/mcpluginlab/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.txt)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)
 ![Compose Desktop](https://img.shields.io/badge/Compose-Desktop-4285F4?logo=jetpackcompose&logoColor=white)
 ![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)
 ![MCP](https://img.shields.io/badge/MCP-ready-000000)
+
+**[⬇ Download the latest release](https://github.com/l299l/mcpluginlab/releases/latest)**
 
 ![Project overview](docs/images/overview.png)
 
@@ -57,12 +61,13 @@ projects you start with one click:
 </tr>
 </table>
 
-## Quick start
+## Install
 
-Requirements: Linux x64 and Java 21 or newer. Servers, proxies, bots and the client get the Java they need
-automatically.
-
-Download `mpl-<version>.zip` from the [latest release](../../releases/latest), then:
+1. Make sure you have **Linux x64** and **Java 21 or newer** (`java -version`). Servers, proxies, bots and the
+   client get the Java they need automatically.
+2. Download `mpl-<version>.zip` from the [latest release](https://github.com/l299l/mcpluginlab/releases/latest)
+   (all versions are on the [releases page](https://github.com/l299l/mcpluginlab/releases)).
+3. Unzip it and start McPluginLab:
 
 ```bash
 unzip mpl-1.0.0.zip
@@ -71,7 +76,11 @@ mpl desktop                               # optional: add McPluginLab to your ap
 mpl gui
 ```
 
-To build from source instead, see [Building from source](#building-from-source).
+To update, download the new release, replace the folder and run `mpl desktop` again. Your projects and servers are stored outside it
+(`~/.local/share/mcpluginlab`), so they are kept. To build from source instead, see
+[Building from source](#building-from-source).
+
+## Quick start
 
 Create a project in the GUI, or do the same from the command line:
 
@@ -145,7 +154,7 @@ flowchart LR
 ## Building from source
 
 ```bash
-git clone <this repository> McPluginLab && cd McPluginLab
+git clone https://github.com/l299l/mcpluginlab.git McPluginLab && cd McPluginLab
 ./gradlew installDist   # cli/build/install/mpl/bin/mpl
 ./gradlew test          # run the tests
 ./gradlew :cli:distZip  # release archive in cli/build/distributions
@@ -153,3 +162,7 @@ git clone <this repository> McPluginLab && cd McPluginLab
 
 Rebuilding while `mpl` runs is safe: the daemon and the GUI run from a private copy of the jars. An idle
 daemon picks up a new build automatically; with instances running, the GUI offers to restart it.
+
+## License
+
+McPluginLab is released under the [MIT License](LICENSE.txt).

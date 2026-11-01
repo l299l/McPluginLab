@@ -8,7 +8,7 @@ Java version they need automatically (see [Java](#java)).
 Download `mpl-<version>.zip` from the releases page and unzip it, or build it yourself:
 
 ```bash
-git clone <this repository> McPluginLab && cd McPluginLab
+git clone https://github.com/l299l/mcpluginlab.git McPluginLab && cd McPluginLab
 ./gradlew installDist     # the distribution is in cli/build/install/mpl
 ```
 
