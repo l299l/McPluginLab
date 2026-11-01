@@ -2,18 +2,20 @@
 
 ## Install
 
-McPluginLab runs on Linux and needs a JDK 21 or newer for itself. Servers, proxies, bots and clients get the Java
-version they need automatically (see [Java](#java)).
+McPluginLab runs on Linux x64 and needs Java 21 or newer for itself. Servers, proxies, bots and clients get the
+Java version they need automatically (see [Java](#java)).
+
+Download `mpl-<version>.zip` from the releases page and unzip it, or build it yourself:
 
 ```bash
 git clone <this repository> McPluginLab && cd McPluginLab
-./gradlew installDist
+./gradlew installDist     # the distribution is in cli/build/install/mpl
 ```
 
-The distribution is in `cli/build/install/mpl`. Put its `bin` folder on your `PATH` or add an alias:
+Put the `bin` folder on your `PATH` or add an alias:
 
 ```bash
-alias mpl=/path/to/McPluginLab/cli/build/install/mpl/bin/mpl
+alias mpl=/path/to/mpl-1.0.0/bin/mpl
 ```
 
 `mpl desktop` adds McPluginLab with its icon to your application menu.

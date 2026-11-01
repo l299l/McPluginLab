@@ -59,17 +59,21 @@ projects you start with one click:
 
 ## Quick start
 
-Requirements: Linux and a JDK 21 or newer to build and run `mpl`. Server JDKs are handled for you.
+Requirements: Linux x64 and Java 21 or newer. Servers, proxies, bots and the client get the Java they need
+automatically.
+
+Download `mpl-<version>.zip` from the [latest release](../../releases/latest), then:
 
 ```bash
-git clone <this repository> McPluginLab && cd McPluginLab
-./gradlew installDist
-alias mpl=$PWD/cli/build/install/mpl/bin/mpl
-
+unzip mpl-1.0.0.zip
+export PATH="$PWD/mpl-1.0.0/bin:$PATH"   # or add it to your shell profile
+mpl desktop                               # optional: add McPluginLab to your application menu
 mpl gui
 ```
 
-Or the same from the command line:
+To build from source instead, see [Building from source](#building-from-source).
+
+Create a project in the GUI, or do the same from the command line:
 
 ```bash
 mpl project create skywars
@@ -141,9 +145,11 @@ flowchart LR
 ## Building from source
 
 ```bash
-./gradlew installDist   # build the mpl distribution
+git clone <this repository> McPluginLab && cd McPluginLab
+./gradlew installDist   # cli/build/install/mpl/bin/mpl
 ./gradlew test          # run the tests
+./gradlew :cli:distZip  # release archive in cli/build/distributions
 ```
 
-Rebuilding while `mpl` runs is safe: the daemon and the GUI run from a private copy of the jars.
-Run `mpl shutdown` to restart the daemon on a new build. Running servers are stopped first.
+Rebuilding while `mpl` runs is safe: the daemon and the GUI run from a private copy of the jars. An idle
+daemon picks up a new build automatically; with instances running, the GUI offers to restart it.

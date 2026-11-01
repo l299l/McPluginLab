@@ -13,6 +13,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.boolean
 import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.int
@@ -27,6 +28,7 @@ import dev.mpl.api.InstanceInfo
 import dev.mpl.api.InstanceType
 import dev.mpl.api.MplClient
 import dev.mpl.api.MplException
+import dev.mpl.api.MplVersion
 import dev.mpl.api.PluginLink
 import dev.mpl.api.UpdateInstanceRequest
 import dev.mpl.api.UpdateProjectRequest
@@ -68,6 +70,10 @@ abstract class ClientCommand(name: String, private val help: String) : CliktComm
 const val OUTDATED_WARNING = "The daemon runs an older build of McPluginLab and has running instances; run 'mpl shutdown' to stop them and restart it."
 
 class Mpl : CliktCommand("mpl") {
+    init {
+        versionOption(MplVersion.current, names = setOf("-V", "--version"))
+    }
+
     override fun help(context: Context) = "McPluginLab: run and test Minecraft servers, proxies and plugins"
     override fun run() = Unit
 }

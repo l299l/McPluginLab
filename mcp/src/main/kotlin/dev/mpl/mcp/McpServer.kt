@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import dev.mpl.api.MplVersion
 import java.io.BufferedReader
 import java.io.PrintStream
 
@@ -36,7 +37,7 @@ class McpServer(private val tools: List<Tool>, private val input: BufferedReader
                 putJsonObject("capabilities") { putJsonObject("tools") {} }
                 putJsonObject("serverInfo") {
                     put("name", "mcpluginlab")
-                    put("version", "0.1.0")
+                    put("version", MplVersion.current)
                 }
                 put("instructions", INSTRUCTIONS)
             }

@@ -10,7 +10,11 @@ plugins {
 
 subprojects {
     group = "dev.mpl"
-    version = "0.1.0-SNAPSHOT"
+    version = "1.0.0"
+
+    tasks.withType<Jar>().configureEach {
+        manifest { attributes("Implementation-Title" to "McPluginLab", "Implementation-Version" to project.version) }
+    }
 
     tasks.withType<AbstractArchiveTask>().configureEach {
         isPreserveFileTimestamps = false

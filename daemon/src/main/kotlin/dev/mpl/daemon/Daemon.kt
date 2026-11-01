@@ -3,6 +3,7 @@ package dev.mpl.daemon
 import dev.mpl.api.DaemonInfo
 import dev.mpl.api.MplHome
 import dev.mpl.api.MplJson
+import dev.mpl.api.MplVersion
 import dev.mpl.core.Lab
 import dev.mpl.core.Workspace
 import io.ktor.server.cio.CIO
@@ -61,6 +62,6 @@ class Daemon(home: Path = MplHome.path, cache: Path = MplHome.cache) {
 
     companion object {
         const val DEFAULT_PORT = 47817
-        const val VERSION = "0.1.0"
+        val VERSION = MplVersion.current
     }
 }
