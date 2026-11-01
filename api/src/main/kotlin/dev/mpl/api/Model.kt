@@ -79,7 +79,7 @@ data class PluginStatus(
 )
 
 @Serializable
-data class UpdateProjectRequest(val onlineMode: Boolean? = null)
+data class UpdateProjectRequest(val onlineMode: Boolean? = null, val dir: String? = null)
 
 @Serializable
 data class UpdateInstanceRequest(

@@ -113,9 +113,10 @@ class ProjectRemove : ClientCommand("rm", "Remove a project and its instances") 
 class ProjectSet : ClientCommand("set", "Change project settings") {
     private val name by argument()
     private val onlineMode by option("--online-mode", help = "Proxy and forwarding online mode (true/false)").boolean()
+    private val dir by option("--dir", help = "Move the project's server folders here (instances must be stopped)")
     override suspend fun execute(client: MplClient) {
-        val updated = client.updateProject(name, UpdateProjectRequest(onlineMode))
-        echo("${updated.def.name}: online-mode=${updated.def.onlineMode}")
+        val updated = client.updateProject(name, UpdateProjectRequest(onlineMode, dir))
+        echo("${updated.def.name}: online-mode=${updated.def.onlineMode}, folder ${updated.def.dir}")
     }
 }
 

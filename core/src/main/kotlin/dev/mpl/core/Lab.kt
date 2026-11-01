@@ -46,10 +46,17 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
+import kotlin.io.path.copyToRecursively
+import kotlin.io.path.deleteIfExists
+import kotlin.io.path.deleteRecursively
 import kotlin.io.path.absolute
 import kotlin.io.path.copyTo
 import kotlin.io.path.createDirectories
@@ -73,6 +80,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     private val projects = ConcurrentHashMap<String, ProjectDef>()
     private val instances = ConcurrentHashMap<InstanceId, Instance>()
     private val configLocks = ConcurrentHashMap<String, Any>()
+    private val pendingRestarts = ConcurrentHashMap.newKeySet<InstanceId>()
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 256)
     val events: SharedFlow<Event> = _events.asSharedFlow()
 
@@ -116,10 +124,35 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     }
 
     suspend fun updateProject(name: String, req: UpdateProjectRequest): ProjectInfo {
+        req.dir?.let { moveProject(name, Path(it).absolute().normalize()) }
         val updated = updateProjectDef(name) { project -> req.onlineMode?.let { project.copy(onlineMode = it) } ?: project }
         syncNetwork(name, reloadProxy = false)
         _events.emit(Event.ProjectsChanged)
         return updated.info()
+    }
+
+    @OptIn(ExperimentalPathApi::class)
+    private suspend fun moveProject(name: String, target: Path) = withContext(Dispatchers.IO) {
+        val from = Path(project(name).dir)
+        if (from == target) return@withContext
+        require(instanceDefs(name).none { isAlive(it.id) }) { "Stop all instances of $name before moving it" }
+        require(!target.startsWith(from)) { "Cannot move $name into its own folder" }
+        require(!target.exists() || target.listDirectoryEntries().isEmpty()) { "$target is not empty" }
+        target.deleteIfExists()
+        target.parent.createDirectories()
+        try {
+            Files.move(from, target, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: IOException) {
+            from.copyToRecursively(target, followLinks = false, overwrite = false)
+            from.deleteRecursively()
+        }
+        instances.values.filter { it.def.project == name && Path(it.def.dir).startsWith(from) }.forEach { instance ->
+            val def = instance.def.copy(dir = target.resolve(from.relativize(Path(instance.def.dir))).toString())
+            workspace.save(def)
+            instances[def.id] = Instance(def, instance.process)
+        }
+        updateProjectDef(name) { it.copy(dir = target.toString()) }
+        _events.emit(Event.InstancesChanged(name))
     }
 
     suspend fun savePlugin(project: String, link: PluginLink): List<PluginStatus> {
@@ -268,7 +301,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     suspend fun stopGroup(project: String, names: List<String>): List<InstanceInfo> {
         val targets = group(project, names)
         val phases = listOf(targets.filter { it.def.type.isPlayer }, targets.filter { it.def.type.isProxy }, targets.filter { !it.def.type.isPlayer && !it.def.type.isProxy })
-        phases.forEach { phase -> coroutineScope { phase.map { async { it.process.stop() } }.awaitAll() } }
+        phases.forEach { phase -> coroutineScope { phase.map { async { stop(it.def.id) } }.awaitAll() } }
         return list(project)
     }
 
@@ -309,25 +342,30 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     private fun source(software: String) = sources[software] ?: throw IllegalArgumentException("Unknown server software '$software'")
 
     suspend fun stop(id: InstanceId): InstanceInfo {
+        pendingRestarts.remove(id)
         get(id).process.stop()
         return info(id)
     }
 
     fun requestStop(id: InstanceId): InstanceInfo {
+        pendingRestarts.remove(id)
         get(id).process.requestStop()
         return info(id)
     }
 
     fun requestRestart(id: InstanceId): InstanceInfo {
         val process = get(id).process
+        pendingRestarts.add(id)
         process.requestStop()
         scope.launch {
-            runCatching { restart(id) }.onFailure { process.log.append("[mpl] restart failed: ${it.message}") }
+            process.stop()
+            if (pendingRestarts.remove(id)) runCatching { start(id) }.onFailure { process.log.append("[mpl] restart failed: ${it.message}") }
         }
         return info(id)
     }
 
     suspend fun kill(id: InstanceId): InstanceInfo {
+        pendingRestarts.remove(id)
         get(id).process.kill()
         return info(id)
     }

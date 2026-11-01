@@ -1,6 +1,7 @@
 package dev.mpl.gui.terminal
 
 import com.jediterm.terminal.TerminalColor
+import com.jediterm.terminal.TextStyle
 import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import dev.mpl.api.InstanceId
@@ -30,6 +31,9 @@ class ConsoleTerminal(client: MplClient, id: InstanceId) {
 
         override fun getDefaultForeground() = foreground
         override fun getDefaultBackground() = background
+
+        @Suppress("OVERRIDE_DEPRECATION")
+        override fun getDefaultStyle() = TextStyle(foreground, background)
         override fun getTerminalFont(): Font = Font(Font.MONOSPACED, Font.PLAIN, terminalFontSize.toInt())
         override fun getTerminalFontSize() = 14f
         override fun getBufferMaxLinesCount() = 10_000
