@@ -45,6 +45,9 @@ class AppState(initialClient: MplClient, private val scope: CoroutineScope) {
     var busy by mutableStateOf<Set<String>>(emptySet())
         private set
     val snackbar = SnackbarHostState()
+    var closeRequested by mutableStateOf(false)
+    var quitting by mutableStateOf(false)
+        private set
 
     private val consoles = mutableMapOf<InstanceId, ConsoleTerminal>()
 
@@ -96,6 +99,20 @@ class AppState(initialClient: MplClient, private val scope: CoroutineScope) {
     suspend fun readFile(id: InstanceId, path: String): String = client.readFile(id, path).text
 
     suspend fun writeFile(id: InstanceId, path: String, text: String) = client.writeFile(id, path, text)
+
+    val aliveInstances: List<InstanceInfo> get() = instances.filter { it.state.isAlive }
+
+    fun requestClose(exit: () -> Unit) {
+        if (aliveInstances.isEmpty()) quit(exit) else closeRequested = true
+    }
+
+    fun quit(exit: () -> Unit) {
+        quitting = true
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { DaemonConnection.shutdown(client) } }
+            exit()
+        }
+    }
 
     private fun offerDaemonRestart() = scope.launch {
         val result = snackbar.showSnackbar(
@@ -181,7 +198,7 @@ class AppState(initialClient: MplClient, private val scope: CoroutineScope) {
                 client.events { for (frame in incoming) refresh() }
             }
             delay(1_000)
-            runCatching { useClient(withContext(Dispatchers.IO) { DaemonConnection.connect(restartOutdated = false) }) }
+            if (!quitting) runCatching { useClient(withContext(Dispatchers.IO) { DaemonConnection.connect(restartOutdated = false) }) }
         }
     }
 

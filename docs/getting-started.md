@@ -18,7 +18,9 @@ alias mpl=/path/to/McPluginLab/cli/build/install/mpl/bin/mpl
 
 `mpl desktop` adds McPluginLab with its icon to your application menu.
 
-The first `mpl` command starts the background daemon. You never have to start it yourself. After you rebuild
+The first `mpl` command starts the background daemon. You never have to start it yourself. Closing the window
+stops the daemon too when nothing is running; when instances are running it asks whether to keep them running
+in the background or stop everything. `mpl shutdown` turns everything off from the terminal. After you rebuild
 McPluginLab, the next command restarts an idle daemon on the new build automatically; if instances are running,
 the GUI offers **Restart daemon** instead (the CLI asks you to run `mpl shutdown`).
 

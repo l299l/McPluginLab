@@ -17,15 +17,18 @@ const val APP_NAME = "McPluginLab"
 fun runGui(client: MplClient) {
     setWindowClass(APP_NAME)
     application {
+        val scope = rememberCoroutineScope()
+        val state = remember { AppState(client, scope) }
         Window(
-            onCloseRequest = ::exitApplication,
+            onCloseRequest = { state.requestClose(::exitApplication) },
             title = APP_NAME,
             icon = remember { appIcon() },
             state = rememberWindowState(width = 1360.dp, height = 860.dp),
         ) {
-            val scope = rememberCoroutineScope()
-            val state = remember { AppState(client, scope) }
-            MplTheme { App(state) }
+            MplTheme {
+                App(state)
+                if (state.closeRequested) QuitDialog(state, onKeepRunning = ::exitApplication, onQuit = { state.quit(::exitApplication) })
+            }
         }
     }
 }

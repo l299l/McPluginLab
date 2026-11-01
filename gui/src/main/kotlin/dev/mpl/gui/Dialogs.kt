@@ -285,6 +285,25 @@ private fun DialogButtons(confirm: String, enabled: Boolean, onCancel: () -> Uni
     }
 }
 
+@Composable
+fun QuitDialog(state: AppState, onKeepRunning: () -> Unit, onQuit: () -> Unit) {
+    val alive = state.aliveInstances
+    MplDialog(if (state.quitting) "Stopping…" else "Instances are still running", { state.closeRequested = false }, width = 520) {
+        Text(
+            if (state.quitting) "Stopping ${alive.size} running instances and the daemon."
+            else if (alive.size == 1) "${alive.single().def.id} is running. Keep it running in the background, or stop it and quit?"
+            else "${alive.joinToString { it.def.id.toString() }} are running. Keep them running in the background, or stop everything and quit?",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+            TextButton(onClick = { state.closeRequested = false }, enabled = !state.quitting) { Text("Cancel") }
+            OutlinedButton(onClick = onKeepRunning, enabled = !state.quitting) { Text("Keep running") }
+            Button(onClick = onQuit, enabled = !state.quitting) { Text("Stop all and quit") }
+        }
+    }
+}
+
 val openDialogs = mutableIntStateOf(0)
 
 @Composable
