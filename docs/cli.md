@@ -8,9 +8,10 @@ with `-P project` or the `MPL_PROJECT` variable. `mpl <command> --help` shows ev
 | Command | |
 |---|---|
 | `mpl gui` | Open the desktop app |
+| `mpl desktop` | Add McPluginLab with its icon to the application menu |
 | `mpl mcp` | Run the MCP server on stdio |
 | `mpl daemon` | Run the daemon in the foreground (normally started automatically) |
-| `mpl shutdown` | Stop all instances and the daemon |
+| `mpl shutdown` | Stop all instances and the daemon (it starts again on the next command) |
 
 ## Projects
 

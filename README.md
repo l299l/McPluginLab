@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="gui/src/main/resources/icon.svg" width="112" alt="McPluginLab icon">
+
 # McPluginLab
 
 **A workbench for testing Minecraft plugins.**

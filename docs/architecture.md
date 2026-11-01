@@ -21,8 +21,9 @@ flowchart TB
 ```
 
 The daemon is started on demand by the first client. It writes `daemon.json` (port, token, pid, build) into
-`MPL_HOME` and holds `daemon.lock` so only one daemon runs per workspace. When a client was built from a newer
-build than the running daemon, it prints a warning; `mpl shutdown` restarts the daemon on the new build.
+`MPL_HOME` and holds `daemon.lock` so only one daemon runs per workspace. The build ID is a hash of McPluginLab's own jars (built
+reproducibly), so it changes only when the code does. A client from a different build restarts an idle daemon
+on its own build; when instances are running it warns instead, because restarting stops them.
 
 The daemon and the GUI run from a copy of the jars in `MPL_CACHE/runtime/<build>`, so rebuilding McPluginLab
 never pulls classes out from under a running process. Copies still in use are kept; older ones are removed.

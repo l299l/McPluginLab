@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
@@ -27,7 +28,15 @@ fun App(state: AppState) {
             val project = state.project
             if (project == null) HomeScreen(state) else ProjectScreen(state, project.def.name)
         }
-        SnackbarHost(state.snackbar)
+        SnackbarHost(state.snackbar) { data ->
+            Snackbar(
+                data,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                actionColor = MaterialTheme.colorScheme.primary,
+                dismissActionContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

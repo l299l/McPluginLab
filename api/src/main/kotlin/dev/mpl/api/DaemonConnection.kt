@@ -1,9 +1,12 @@
 package dev.mpl.api
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.Path
 import kotlin.io.path.copyTo
 import kotlin.io.path.createDirectories
@@ -14,10 +17,12 @@ import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.listDirectoryEntries
+import kotlin.io.path.readBytes
 
 object DaemonConnection {
     private const val MAIN_CLASS = "dev.mpl.cli.MainKt"
     private const val KEPT_RUNTIMES = 3
+    private val OWN_JARS = listOf("api-", "core-", "daemon-", "gui-", "mcp-", "cli-")
 
     private val classpath: List<Path> by lazy { System.getProperty("java.class.path").split(File.pathSeparator).map { Path(it) } }
 
@@ -25,13 +30,17 @@ object DaemonConnection {
         System.getProperty("mpl.build")?.let { return@lazy it }
         val digest = MessageDigest.getInstance("SHA-256")
         classpath.filter { it.isRegularFile() }.forEach {
-            digest.update("${it.fileName}:${it.fileSize()}:${it.getLastModifiedTime().toMillis()}".toByteArray())
+            digest.update("${it.fileName}:${it.fileSize()}".toByteArray())
+            if (OWN_JARS.any(it.fileName.toString()::startsWith)) digest.update(it.readBytes())
         }
         digest.digest().toHexString().take(16)
     }
 
-    suspend fun connect(): MplClient {
-        MplClient.fromHome()?.takeIf { it.ping() }?.let { return it }
+    suspend fun connect(restartOutdated: Boolean = true): MplClient {
+        MplClient.fromHome()?.takeIf { it.ping() }?.let { client ->
+            if (!restartOutdated || !client.isOutdated || client.instances().any { it.state != InstanceState.STOPPED && it.state != InstanceState.CRASHED }) return client
+            shutdown(client)
+        }
         startDaemon()
         repeat(60) {
             delay(250)
@@ -40,9 +49,15 @@ object DaemonConnection {
         throw MplException("Daemon did not start, see ${MplHome.path.resolve("logs/daemon.log")}")
     }
 
+    suspend fun shutdown(client: MplClient) {
+        client.shutdown()
+        client.close()
+        withContext(Dispatchers.IO) { ProcessHandle.of(client.info.pid).ifPresent { it.onExit().get(2, TimeUnit.MINUTES) } }
+    }
+
     fun selfCommand(vararg args: String, classpath: String = System.getProperty("java.class.path")): List<String> {
         val java = ProcessHandle.current().info().command().orElse("java")
-        return listOf(java, "--enable-native-access=ALL-UNNAMED", "-Dmpl.build=$build", "-cp", classpath, MAIN_CLASS, *args)
+        return listOf(java, "--enable-native-access=ALL-UNNAMED", "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED", "-Dmpl.build=$build", "-cp", classpath, MAIN_CLASS, *args)
     }
 
     fun runFromRuntimeCopy(vararg args: String): Int? {

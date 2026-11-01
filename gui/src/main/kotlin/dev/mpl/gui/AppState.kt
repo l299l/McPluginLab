@@ -1,7 +1,10 @@
 package dev.mpl.gui
 
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.mpl.api.CreateInstanceRequest
@@ -25,7 +28,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class AppState(val client: MplClient, private val scope: CoroutineScope) {
+class AppState(initialClient: MplClient, private val scope: CoroutineScope) {
+    var client = initialClient
+        private set
+    var connection by mutableIntStateOf(0)
+        private set
     var projects by mutableStateOf<List<ProjectInfo>>(emptyList())
         private set
     var instances by mutableStateOf<List<InstanceInfo>>(emptyList())
@@ -47,7 +54,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
 
     init {
         scope.launch { watchEvents() }
-        if (client.isOutdated) report(MplException("The daemon runs an older build; restart it to use this one."))
+        if (client.isOutdated) offerDaemonRestart()
     }
 
     fun open(project: String) {
@@ -89,6 +96,30 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
     suspend fun readFile(id: InstanceId, path: String): String = client.readFile(id, path).text
 
     suspend fun writeFile(id: InstanceId, path: String, text: String) = client.writeFile(id, path, text)
+
+    private fun offerDaemonRestart() = scope.launch {
+        val result = snackbar.showSnackbar(
+            "The daemon runs an older build of McPluginLab. Restarting it stops the running instances.",
+            actionLabel = "Restart daemon",
+            withDismissAction = true,
+            duration = SnackbarDuration.Indefinite,
+        )
+        if (result == SnackbarResult.ActionPerformed) launchFor("daemon") {
+            val old = client
+            useClient(withContext(Dispatchers.IO) {
+                DaemonConnection.shutdown(old)
+                DaemonConnection.connect(restartOutdated = false)
+            })
+        }
+    }
+
+    private fun useClient(fresh: MplClient) {
+        if (fresh.info.token == client.info.token) return
+        consoles.values.forEach { it.close() }
+        consoles.clear()
+        client = fresh
+        connection++
+    }
 
     fun report(e: Throwable) {
         scope.launch { snackbar.showSnackbar(e.message ?: e.toString()) }
@@ -150,6 +181,7 @@ class AppState(val client: MplClient, private val scope: CoroutineScope) {
                 client.events { for (frame in incoming) refresh() }
             }
             delay(1_000)
+            runCatching { useClient(withContext(Dispatchers.IO) { DaemonConnection.connect(restartOutdated = false) }) }
         }
     }
 

@@ -49,7 +49,7 @@ fun InstancePane(state: AppState, info: InstanceInfo) {
             Tab("Files", selected = showFiles) { showFiles = true }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        key(id, showFiles) {
+        key(id, showFiles, state.connection) {
             if (showFiles) FilesTab(state, id)
             else if (openDialogs.intValue > 0) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
             else SwingPanel(factory = { state.console(id).widget }, modifier = Modifier.fillMaxSize())

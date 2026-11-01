@@ -12,6 +12,11 @@ subprojects {
     group = "dev.mpl"
     version = "0.1.0-SNAPSHOT"
 
+    tasks.withType<AbstractArchiveTask>().configureEach {
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
+    }
+
     plugins.withId("org.jetbrains.kotlin.jvm") {
         extensions.configure<KotlinJvmProjectExtension> {
             compilerOptions { jvmTarget.set(JvmTarget.JVM_21) }

@@ -31,7 +31,15 @@ import dev.mpl.api.PluginLink
 import dev.mpl.api.UpdateInstanceRequest
 import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.daemon.Daemon
+import dev.mpl.gui.APP_NAME
+import dev.mpl.gui.iconSvg
 import dev.mpl.gui.runGui
+import java.io.File
+import kotlin.io.path.Path
+import kotlin.io.path.createDirectories
+import kotlin.io.path.isRegularFile
+import kotlin.io.path.writeBytes
+import kotlin.io.path.writeText
 import dev.mpl.mcp.LabTools
 import dev.mpl.mcp.McpServer
 import kotlinx.coroutines.runBlocking
@@ -43,8 +51,10 @@ abstract class ClientCommand(name: String, private val help: String) : CliktComm
 
     override fun help(context: Context) = help
 
+    protected open val restartOutdated = true
+
     final override fun run() = runBlocking {
-        DaemonConnection.connect().use { client ->
+        DaemonConnection.connect(restartOutdated).use { client ->
             if (client.isOutdated && this@ClientCommand !is Shutdown) echo(OUTDATED_WARNING, err = true)
             execute(client)
         }
@@ -55,7 +65,7 @@ abstract class ClientCommand(name: String, private val help: String) : CliktComm
     protected fun ref(value: String) = InstanceId.parse(value, project)
 }
 
-const val OUTDATED_WARNING = "The daemon runs an older build of McPluginLab; run 'mpl shutdown' to restart it with this one."
+const val OUTDATED_WARNING = "The daemon runs an older build of McPluginLab and has running instances; run 'mpl shutdown' to stop them and restart it."
 
 class Mpl : CliktCommand("mpl") {
     override fun help(context: Context) = "McPluginLab: run and test Minecraft servers, proxies and plugins"
@@ -71,14 +81,42 @@ class DaemonCommand : CliktCommand("daemon") {
 }
 
 class Shutdown : ClientCommand("shutdown", "Stop all instances and the daemon") {
+    override val restartOutdated = false
+
     override suspend fun execute(client: MplClient) {
-        echo(client.shutdown().message)
-        ProcessHandle.of(client.info.pid).ifPresent { it.onExit().get(2, TimeUnit.MINUTES) }
+        echo("Shutting down")
+        DaemonConnection.shutdown(client)
     }
 }
 
 class Mcp : ClientCommand("mcp", "Run an MCP server on stdio for AI agents (claude mcp add mpl -- mpl mcp)") {
-    override suspend fun execute(client: MplClient) = McpServer(LabTools(client) { DaemonConnection.connect() }.all, System.`in`.bufferedReader(), System.out).run()
+    override suspend fun execute(client: MplClient) = McpServer(LabTools(client) { DaemonConnection.connect(restartOutdated = false) }.all, System.`in`.bufferedReader(), System.out).run()
+}
+
+class DesktopEntry : CliktCommand("desktop") {
+    override fun help(context: Context) = "Add McPluginLab with its icon to the application menu"
+    override fun run() {
+        val launcher = Path(System.getProperty("java.class.path").substringBefore(File.pathSeparator)).toAbsolutePath().parent.parent.resolve("bin/mpl")
+        if (!launcher.isRegularFile()) throw MplException("Run this from the installed distribution (bin/mpl), not from a runtime copy")
+        val data = Path(System.getenv("XDG_DATA_HOME") ?: "${System.getProperty("user.home")}/.local/share")
+        val icon = data.resolve("icons/hicolor/scalable/apps/mcpluginlab.svg").apply { parent.createDirectories() }
+        icon.writeBytes(iconSvg())
+        val entry = data.resolve("applications/mcpluginlab.desktop").apply { parent.createDirectories() }
+        entry.writeText(
+            listOf(
+                "[Desktop Entry]",
+                "Type=Application",
+                "Name=$APP_NAME",
+                "Comment=Run and test Minecraft plugins",
+                "Exec=$launcher gui",
+                "Icon=mcpluginlab",
+                "Terminal=false",
+                "Categories=Development;Game;",
+                "StartupWMClass=$APP_NAME",
+            ).joinToString("\n", postfix = "\n"),
+        )
+        echo("Installed $entry")
+    }
 }
 
 class Gui : CliktCommand("gui") {
@@ -399,7 +437,7 @@ fun main(args: Array<String>) {
     DaemonConnection.markRuntimeInUse()
     try {
         Mpl().subcommands(
-            DaemonCommand(), Shutdown(), Gui(), Mcp(),
+            DaemonCommand(), Shutdown(), Gui(), DesktopEntry(), Mcp(),
             GroupCommand("project", "Manage projects").subcommands(ProjectList(), ProjectCreate(), ProjectRemove(), ProjectSet()),
             GroupCommand("plugin", "Manage plugin links (use -P project)").subcommands(PluginList(), PluginAdd(), PluginRemove()),
             Deploy(),

@@ -15,5 +15,5 @@ dependencies {
 application {
     mainClass.set("dev.mpl.cli.MainKt")
     applicationName = "mpl"
-    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED", "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED")
 }

@@ -16,7 +16,11 @@ The distribution is in `cli/build/install/mpl`. Put its `bin` folder on your `PA
 alias mpl=/path/to/McPluginLab/cli/build/install/mpl/bin/mpl
 ```
 
-The first `mpl` command starts the background daemon. You never have to start it yourself.
+`mpl desktop` adds McPluginLab with its icon to your application menu.
+
+The first `mpl` command starts the background daemon. You never have to start it yourself. After you rebuild
+McPluginLab, the next command restarts an idle daemon on the new build automatically; if instances are running,
+the GUI offers **Restart daemon** instead (the CLI asks you to run `mpl shutdown`).
 
 ## Concepts
 
