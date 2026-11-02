@@ -40,17 +40,20 @@ import dev.mpl.api.InstanceState
 fun InstancePane(state: AppState, info: InstanceInfo) {
     val id = info.def.id
     var removing by remember(id) { mutableStateOf(false) }
-    var showFiles by remember(id) { mutableStateOf(false) }
+    var tab by remember(id) { mutableStateOf(PaneTab.CONSOLE) }
+    val isDatabase = info.def.type.isDatabase
 
     Column(Modifier.fillMaxSize()) {
         Header(state, info, onRemove = { removing = true })
         Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp)) {
-            Tab("Console", selected = !showFiles) { showFiles = false }
-            Tab("Files", selected = showFiles) { showFiles = true }
+            Tab("Console", selected = tab == PaneTab.CONSOLE) { tab = PaneTab.CONSOLE }
+            if (isDatabase) Tab("Connection", selected = tab == PaneTab.CONNECTION) { tab = PaneTab.CONNECTION }
+            Tab("Files", selected = tab == PaneTab.FILES) { tab = PaneTab.FILES }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        key(id, showFiles, state.connection) {
-            if (showFiles) FilesTab(state, id)
+        key(id, tab, state.connection) {
+            if (tab == PaneTab.FILES) FilesTab(state, id)
+            else if (tab == PaneTab.CONNECTION) DatabaseTab(state, info)
             else if (openDialogs.intValue > 0) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
             else SwingPanel(factory = { state.console(id).widget }, modifier = Modifier.fillMaxSize())
         }
@@ -67,6 +70,8 @@ fun InstancePane(state: AppState, info: InstanceInfo) {
         },
     )
 }
+
+private enum class PaneTab { CONSOLE, CONNECTION, FILES }
 
 @Composable
 fun Tab(label: String, selected: Boolean, onClick: () -> Unit) {

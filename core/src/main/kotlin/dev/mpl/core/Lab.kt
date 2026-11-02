@@ -16,6 +16,11 @@ import dev.mpl.api.ProjectInfo
 import dev.mpl.api.UpdateInstanceRequest
 import dev.mpl.api.UpdateProjectRequest
 import dev.mpl.core.bots.SoulFire
+import dev.mpl.core.database.DatabaseBinaries
+import dev.mpl.core.database.DatabaseConfigurator
+import dev.mpl.core.database.DatabaseService
+import dev.mpl.api.DatabaseInfo
+import dev.mpl.api.DatabaseSettings
 import dev.mpl.core.download.BungeeCordSource
 import dev.mpl.core.download.Downloader
 import dev.mpl.core.download.FillSource
@@ -71,6 +76,8 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     private val jdks = JdkManager(workspace.jdkDir, downloader)
     private val soulFire = SoulFire(workspace.jarCache, workspace.soulFireRuntime)
     private val launcher = MinecraftLauncher(workspace.minecraftDir, downloader)
+    private val databaseBinaries = DatabaseBinaries(workspace.databaseDir, downloader)
+    private val databases = DatabaseService(databaseBinaries)
     private val sources: Map<String, ServerSource> = buildMap {
         listOf("paper", "folia", "velocity", "waterfall").forEach { put(it, FillSource(it, downloader, workspace.jarCache)) }
         put("purpur", PurpurSource(downloader, workspace.jarCache))
@@ -181,7 +188,10 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     fun syncNetwork(project: String, reloadProxy: Boolean = true) {
         val defs = instanceDefs(project)
-        synchronized(configLock(project)) { NetworkConfigurator.sync(project(project), defs) }
+        synchronized(configLock(project)) {
+            NetworkConfigurator.sync(project(project), defs)
+            DatabaseConfigurator.sync(project(project), defs, databases::info)
+        }
         val proxy = Network.proxyOf(defs) ?: return
         if (reloadProxy && isAlive(proxy.id)) sendCommand(proxy.id, NetworkConfigurator.reloadCommand(proxy))
     }
@@ -210,6 +220,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     fun versions(software: String): List<String> = when (software) {
         "soulfire" -> soulFire.versions()
         "minecraft" -> launcher.releases()
+        "mariadb" -> databaseBinaries.versions()
         else -> source(software).versions()
     }
 
@@ -228,13 +239,19 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             name = req.name,
             type = req.type,
             dir = dir.toString(),
-            port = if (req.type.isServer || req.type.isProxy) req.port ?: nextFreePort(req.type) else null,
-            memory = req.memory ?: if (req.type.isProxy) "512M" else "2G",
+            port = if (req.type.isServer || req.type.isProxy || req.type.isDatabase) req.port ?: nextFreePort(req.type) else null,
+            memory = req.memory ?: if (req.type.isProxy || req.type.isDatabase) "512M" else "2G",
             java = req.java ?: InstanceDef.AUTO_JAVA,
             proxied = req.proxied,
         )
         val existingJar = req.jar
-        def = if (req.type == InstanceType.SOULFIRE) {
+        def = if (req.type.isDatabase) {
+            val name = req.databaseName ?: req.project.replace(Regex("[^A-Za-z0-9_]"), "_").take(48)
+            require(DatabaseService.IDENTIFIER.matches(name)) { "Invalid database name '$name' (letters, digits, _)" }
+            val version = req.version ?: databaseBinaries.defaultVersion()
+            databaseBinaries.resolve(version) { println("[$id] $it") }
+            def.copy(jar = "", version = version, database = DatabaseSettings(name, password = newSecret(), bindAll = req.bindAll))
+        } else if (req.type == InstanceType.SOULFIRE) {
             val bots = requireNotNull(req.bots) { "Bot instances need bot settings (target, count)" }
             require(instances.containsKey(InstanceId(req.project, bots.target))) { "No instance '${bots.target}' in ${req.project} to connect bots to" }
             val jar = existingJar?.let { dir.resolve(it) }?.also { require(it.exists()) { "Jar $it not found" } } ?: soulFire.download(req.version)
@@ -289,8 +306,11 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
     }
 
     suspend fun startGroup(project: String, names: List<String>): List<InstanceInfo> {
-        val (late, early) = group(project, names).partition { it.def.type.isPlayer }
-        listOf(early, late).forEach { phase ->
+        val targets = group(project, names)
+        val databases = targets.filter { it.def.type.isDatabase }
+        val late = targets.filter { it.def.type.isPlayer }
+        val early = targets - databases.toSet() - late.toSet()
+        listOf(databases, early, late).forEach { phase ->
             coroutineScope {
                 phase.filter { !it.process.isAlive }.map { instance -> async { startAndAwaitReady(instance) } }.awaitAll()
             }
@@ -300,7 +320,12 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     suspend fun stopGroup(project: String, names: List<String>): List<InstanceInfo> {
         val targets = group(project, names)
-        val phases = listOf(targets.filter { it.def.type.isPlayer }, targets.filter { it.def.type.isProxy }, targets.filter { !it.def.type.isPlayer && !it.def.type.isProxy })
+        val phases = listOf(
+            targets.filter { it.def.type.isPlayer },
+            targets.filter { it.def.type.isProxy },
+            targets.filter { !it.def.type.isPlayer && !it.def.type.isProxy && !it.def.type.isDatabase },
+            targets.filter { it.def.type.isDatabase },
+        )
         phases.forEach { phase -> coroutineScope { phase.map { async { stop(it.def.id) } }.awaitAll() } }
         return list(project)
     }
@@ -322,13 +347,41 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
             return
         }
         withTimeoutOrNull(READY_TIMEOUT_MS) { instance.process.state.first { it != InstanceState.STARTING } }
+        if (instance.def.type.isDatabase) bootstrapDatabase(instance)
+    }
+
+    /** Creates the project database and user once the server accepts connections. Safe to repeat. */
+    private fun bootstrapDatabase(instance: Instance) {
+        if (instance.process.state.value != InstanceState.RUNNING) return
+        runCatching { databases.bootstrap(instance.def) }
+            .onSuccess { note(instance.def.id, "database ${instance.def.database?.database} is ready") }
+            .onFailure { note(instance.def.id, "database setup failed: ${it.message}") }
+    }
+
+    fun databaseInfo(id: InstanceId): DatabaseInfo = databases.info(database(id))
+
+    suspend fun sql(id: InstanceId, sql: String, asRoot: Boolean): String = withContext(Dispatchers.IO) {
+        val def = database(id)
+        check(get(id).process.state.value == InstanceState.RUNNING) { "$id is not running" }
+        databases.execute(def, sql, asRoot)
+    }
+
+    suspend fun resetDatabase(id: InstanceId) = withContext(Dispatchers.IO) {
+        val def = database(id)
+        check(get(id).process.state.value == InstanceState.RUNNING) { "$id is not running" }
+        databases.reset(def)
+        note(id, "database ${def.database?.database} was reset")
+    }
+
+    private fun database(id: InstanceId): InstanceDef = get(id).def.also {
+        require(it.type.isDatabase) { "$id is not a database instance" }
     }
 
     suspend fun start(id: InstanceId): InstanceInfo = withContext(Dispatchers.IO) {
         val instance = get(id)
         check(!instance.process.isAlive) { "$id is already running" }
         syncNetwork(id.project, reloadProxy = false)
-        val java = javaFor(instance.def)
+        val java = if (instance.def.type.isDatabase) "" else javaFor(instance.def)
         instance.process.start(launchSpec(instance.def, java))
         instance.info()
     }
@@ -410,7 +463,10 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
         val process = ManagedProcess(def.id.toString(), workspace.instanceLog(def.id), scope)
         instances[def.id] = Instance(def, process)
         process.state.drop(1)
-            .onEach { _events.emit(Event.StateChanged(def.id, it, process.exitCode)) }
+            .onEach {
+                _events.emit(Event.StateChanged(def.id, it, process.exitCode))
+                if (def.type.isDatabase && it == InstanceState.RUNNING) withContext(Dispatchers.IO) { bootstrapDatabase(instances.getValue(def.id)) }
+            }
             .launchIn(scope)
     }
 
@@ -418,6 +474,10 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     private fun launchSpec(def: InstanceDef, java: String): LaunchSpec {
         val dir = Path(def.dir)
+        if (def.type.isDatabase) {
+            val command = databases.launchCommand(def) { note(def.id, it) }
+            return LaunchSpec(command, dir, def.env, def.effectiveStopCommand, Regex(def.effectiveReadyPattern))
+        }
         if (def.type == InstanceType.SOULFIRE) return botLaunchSpec(def, java)
         if (def.type == InstanceType.CLIENT) return clientLaunchSpec(def, java)
         val portArgs = def.port?.let { port ->
@@ -466,7 +526,7 @@ class Lab(private val workspace: Workspace, private val scope: CoroutineScope) {
 
     private fun nextFreePort(type: InstanceType): Int {
         val used = instances.values.mapNotNull { it.def.port }.toSet()
-        return generateSequence(if (type.isProxy) 25577 else 25565) { it + 1 }.first { it !in used }
+        return generateSequence(if (type.isProxy) 25577 else if (type.isDatabase) 3307 else 25565) { it + 1 }.first { it !in used }
     }
 
     private fun ProjectDef.info(): ProjectInfo {

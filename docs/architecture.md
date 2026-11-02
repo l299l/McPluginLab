@@ -35,7 +35,7 @@ never pulls classes out from under a running process. Copies still in use are ke
 | Module | Contents |
 |---|---|
 | `api` | Shared model, `MplClient` (HTTP/WebSocket client), daemon discovery and start-up |
-| `core` | `Lab` (projects and instances), processes, downloads, JDKs, network config, plugin links, SoulFire, launcher |
+| `core` | `Lab` (projects and instances), processes, downloads, JDKs, network config, plugin links, MariaDB, SoulFire, launcher |
 | `daemon` | Ktor CIO server exposing `core` |
 | `gui` | Compose Desktop app; consoles are JediTerm widgets connected over WebSocket |
 | `mcp` | MCP server and tools |
@@ -62,7 +62,7 @@ MPL_HOME/
   projects/<project>/instances/<name>.yaml   # type, version, folder, port, memory, Java, bots, client
   logs/<project>/<name>.log
 MPL_CACHE/
-  jars/  jdks/  minecraft/  runtime/
+  jars/  jdks/  minecraft/  db/  runtime/
 ```
 
 The YAML files are plain and can be edited while the daemon is stopped.
@@ -75,6 +75,7 @@ All routes are under `/api` and need `Authorization: Bearer <token>` (or `?token
 |---|---|
 | `GET /projects`, `POST /projects`, `PATCH /projects/{p}`, `DELETE /projects/{p}` | Projects |
 | `POST /projects/{p}/start\|stop\|restart` | Group actions (`{"instances": [], "wait": false}`) |
+| `GET …/db`, `POST …/sql`, `POST …/db/reset` | MariaDB instances: connection, SQL, reset |
 | `GET\|POST /projects/{p}/plugins`, `DELETE /projects/{p}/plugins/{name}`, `POST /projects/{p}/deploy` | Plugin links |
 | `POST /projects/{p}/network/sync` | Network config |
 | `GET /instances`, `POST /projects/{p}/instances` | List and create instances |

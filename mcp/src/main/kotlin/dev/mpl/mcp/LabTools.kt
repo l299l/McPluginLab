@@ -3,6 +3,7 @@ package dev.mpl.mcp
 import dev.mpl.api.BotSettings
 import dev.mpl.api.ClientSettings
 import dev.mpl.api.CreateInstanceRequest
+import dev.mpl.api.DbBinding
 import dev.mpl.api.InstanceId
 import dev.mpl.api.InstanceInfo
 import dev.mpl.api.InstanceType
@@ -26,9 +27,9 @@ class LabTools(private var client: MplClient, private val reconnect: suspend () 
             client.instances(args.optString("project")).joinToString("\n") { it.describe() }.ifEmpty { "No instances." }
         },
 
-        tool("create_instance", "Create a server (paper/folia/purpur/spigot), proxy (velocity/waterfall/bungeecord), SoulFire bots (soulfire) or a Minecraft client (client). Downloads what is needed.", {
+        tool("create_instance", "Create a server (paper/folia/purpur/spigot), proxy (velocity/waterfall/bungeecord), MariaDB database (mariadb, one per project: plugins get its connection written into their config via bind_plugin_database), SoulFire bots (soulfire) or a Minecraft client (client). Downloads what is needed.", {
             string("instance", "project/name")
-            string("type", "paper, folia, purpur, spigot, velocity, waterfall, bungeecord, soulfire or client")
+            string("type", "paper, folia, purpur, spigot, velocity, waterfall, bungeecord, mariadb, soulfire or client")
             string("version", "Minecraft/proxy/SoulFire version, default latest stable", required = false)
             integer("port", "Port, default next free")
             string("bot_target", "soulfire/client: instance name in the project to connect to (proxy or server)", required = false)
@@ -36,6 +37,7 @@ class LabTools(private var client: MplClient, private val reconnect: suspend () 
             integer("bot_count", "soulfire: number of bots (default 1)")
             string("bot_prefix", "soulfire: bot name prefix (default Bot)", required = false)
             string("jar", "Existing jar path instead of downloading", required = false)
+            string("database", "mariadb: database name (default: the project name)", required = false)
         }) { args ->
             val id = args.instance()
             val type = InstanceType.valueOf(args.string("type").uppercase())
@@ -45,6 +47,7 @@ class LabTools(private var client: MplClient, private val reconnect: suspend () 
             val request = CreateInstanceRequest(
                 project = id.project, name = id.name, type = type, version = args.optString("version"),
                 port = args.optInt("port"), jar = args.optString("jar"), offlineMode = true, bots = bots, client = player,
+                databaseName = args.optString("database"),
             )
             "Created " + client.create(request).describe()
         },
@@ -134,6 +137,34 @@ class LabTools(private var client: MplClient, private val reconnect: suspend () 
         tool("list_plugins", "List plugin links of a project: source, targets, current jar, last deploy.", {
             string("project", "Project")
         }) { args -> client.plugins(args.string("project")).joinToString("\n") { it.describe() }.ifEmpty { "No plugin links." } },
+
+        tool("bind_plugin_database", "Make a linked plugin use the project's MariaDB: on every start/sync the connection is written into the plugin's config file (the file must already exist, so start the server once first). Pass an empty values string to remove the binding.", {
+            string("project", "Project")
+            string("plugin", "Plugin link name")
+            string("file", "Config file relative to the server folder, e.g. plugins/Shop/config.yml (.yml, .toml or .properties)")
+            string("values", "One key=template per line, e.g. storage.host={host}. Templates: {host} {port} {database} {user} {password} {jdbc}. YAML keys may be dotted paths.")
+        }) { args ->
+            val project = args.string("project")
+            val link = client.plugins(project).firstOrNull { it.link.name == args.string("plugin") }?.link
+                ?: throw IllegalArgumentException("No plugin link '${args.string("plugin")}' in $project")
+            val values = args.string("values").lines().filter { '=' in it }.associate { it.substringBefore('=').trim() to it.substringAfter('=').trim() }
+            client.savePlugin(project, link.copy(db = if (values.isEmpty()) null else DbBinding(args.string("file"), values)))
+            if (values.isEmpty()) "Removed database binding of ${link.name}" else "Bound ${link.name} to the database (${values.size} keys); applied on the next start or sync_network"
+        },
+
+        tool("db_info", "Connection details of a project's MariaDB instance: host, port, database, user, password and JDBC URL.", {
+            string("instance", "project/name of the mariadb instance")
+        }) { args -> client.databaseInfo(args.instance()).let { "host ${it.host}, port ${it.port}, database ${it.database}, user ${it.user}, password ${it.password}\njdbc ${it.jdbc}" } },
+
+        tool("db_query", "Run SQL on a running MariaDB instance as the project user (tab separated output with a header row). Use it to assert on what a plugin stored.", {
+            string("instance", "project/name of the mariadb instance")
+            string("sql", "SQL statement(s)")
+            boolean("as_root", "Run as root instead of the project user (default false)")
+        }) { args -> client.sql(args.instance(), args.string("sql"), args.bool("as_root", false)).output.trimEnd().ifEmpty { "OK" } },
+
+        tool("db_reset", "Drop and recreate the project database so the next test starts clean.", {
+            string("instance", "project/name of the mariadb instance")
+        }) { args -> client.resetDatabase(args.instance()).let { "Database of ${args.string("instance")} was reset" } },
 
         tool("deploy_plugins", "Copy the newest built jar of linked plugins into their target servers now; running targets restart if the link says so.", {
             string("project", "Project")

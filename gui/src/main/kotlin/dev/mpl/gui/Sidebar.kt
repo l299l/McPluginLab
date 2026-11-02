@@ -34,7 +34,8 @@ fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier
     val proxies = state.projectInstances.filter { it.def.type.isProxy }
     val bots = state.projectInstances.filter { it.def.type == InstanceType.SOULFIRE }
     val clients = state.projectInstances.filter { it.def.type == InstanceType.CLIENT }
-    val servers = state.projectInstances - (proxies + bots + clients).toSet()
+    val databases = state.projectInstances.filter { it.def.type.isDatabase }
+    val servers = state.projectInstances - (proxies + databases + bots + clients).toSet()
     val project = state.project ?: return
 
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
@@ -55,6 +56,7 @@ fun Sidebar(state: AppState, onCreate: () -> Unit, modifier: Modifier = Modifier
             item { NavRow("Plugins", "${state.plugins.size} linked", state.page == AppState.ProjectPage.PLUGINS) { state.page = AppState.ProjectPage.PLUGINS } }
             item { NavRow("Network", proxies.firstOrNull()?.def?.type?.name?.lowercase() ?: "no proxy", state.page == AppState.ProjectPage.NETWORK) { state.page = AppState.ProjectPage.NETWORK } }
             section("Proxies", proxies, state)
+            section("Databases", databases, state)
             section("Servers", servers, state)
             section("Bots", bots, state)
             section("Clients", clients, state)

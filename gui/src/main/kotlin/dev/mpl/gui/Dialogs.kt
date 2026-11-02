@@ -49,6 +49,7 @@ import dev.mpl.api.BotSettings
 import dev.mpl.api.ClientSettings
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
+import dev.mpl.api.DbBinding
 import dev.mpl.api.InstanceType
 import dev.mpl.api.MplHome
 import dev.mpl.api.PluginLink
@@ -98,19 +99,22 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
     var prefix by remember { mutableStateOf("Bot") }
     var jar by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("Player") }
+    var databaseName by remember { mutableStateOf("") }
+    var bindAll by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val bots = type == InstanceType.SOULFIRE
     val client = type == InstanceType.CLIENT
 
     LaunchedEffect(type) {
         versions = state.versions(type.software!!)
-        version = versions.firstOrNull { v -> v.none(Char::isLetter) } ?: versions.firstOrNull().orEmpty()
+        version = if (type.isDatabase) versions.firstOrNull().orEmpty() else versions.firstOrNull { v -> v.none(Char::isLetter) } ?: versions.firstOrNull().orEmpty()
     }
 
     val creating = submitted && state.isBusy(name)
     val canCreate = name.isNotBlank() && !creating && when {
         bots -> target.isNotBlank() && (count.toIntOrNull() ?: 0) > 0 && (version.isNotBlank() || jar.isNotBlank())
         client -> version.isNotBlank() && Regex("[A-Za-z0-9_]{3,16}").matches(username)
+        type.isDatabase -> version.isNotBlank() && (databaseName.isBlank() || Regex("[A-Za-z0-9_]{1,48}").matches(databaseName))
         else -> version.isNotBlank() && (type.isProxy || acceptEula)
     }
 
@@ -141,6 +145,17 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
                 OutlinedTextField(count, { count = it.filter(Char::isDigit) }, label = { Text("Bots") }, singleLine = true, modifier = Modifier.weight(1f))
                 OutlinedTextField(prefix, { prefix = it.trim() }, label = { Text("Name prefix") }, singleLine = true, modifier = Modifier.weight(1f))
             }
+        } else if (type.isDatabase) {
+            VersionField(version, versions, onChange = { version = it })
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(port, { port = it.filter(Char::isDigit) }, label = { Text("Port (auto)") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(databaseName, { databaseName = it.trim() }, label = { Text("Database (project name)") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+            CheckRow("Allow other machines to connect (listen on all interfaces)", bindAll) { bindAll = it }
+            Text(
+                if (version == "system") "Uses the MariaDB installed on this machine." else "Downloads MariaDB $version (several hundred MB) on first use.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         } else {
             VersionField(version, versions, onChange = { version = it })
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -168,6 +183,8 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
                 bots = if (bots) BotSettings(target, count.toInt(), prefix.ifBlank { "Bot" }) else null,
                 client = if (client) ClientSettings(username, target.ifBlank { null }) else null,
                 proxied = proxied,
+                databaseName = databaseName.ifBlank { null }.takeIf { type.isDatabase },
+                bindAll = bindAll && type.isDatabase,
             )
             state.createInstance(request, onDone = onClose)
         }
@@ -177,6 +194,7 @@ fun CreateInstanceDialog(state: AppState, project: String, onClose: () -> Unit) 
 private val TYPE_GROUPS = listOf(
     "Server" to listOf(InstanceType.PAPER, InstanceType.PURPUR, InstanceType.FOLIA, InstanceType.SPIGOT),
     "Proxy" to listOf(InstanceType.VELOCITY, InstanceType.WATERFALL, InstanceType.BUNGEECORD),
+    "Database" to listOf(InstanceType.MARIADB),
     "Player" to listOf(InstanceType.SOULFIRE, InstanceType.CLIENT),
 )
 private val TYPE_LABELS = mapOf(InstanceType.SOULFIRE to "soulfire bots", InstanceType.CLIENT to "minecraft client")
@@ -227,6 +245,9 @@ fun LinkPluginDialog(state: AppState, onClose: () -> Unit) {
     var targets by remember { mutableStateOf(emptySet<String>()) }
     var autoDeploy by remember { mutableStateOf(true) }
     var restart by remember { mutableStateOf(true) }
+    var dbFile by remember { mutableStateOf("") }
+    var dbValues by remember { mutableStateOf("") }
+    val hasDatabase = state.projectInstances.any { it.def.type.isDatabase }
     val scope = rememberCoroutineScope()
 
     MplDialog("Link plugin", onClose) {
@@ -264,10 +285,27 @@ fun LinkPluginDialog(state: AppState, onClose: () -> Unit) {
             CheckRow("Deploy automatically when the jar changes", autoDeploy) { autoDeploy = it }
             CheckRow("Restart running servers after deploying", restart) { restart = it }
         }
+        if (hasDatabase) {
+            Text("Database (optional): write the project database into this plugin's config on every start", style = MaterialTheme.typography.labelLarge)
+            OutlinedTextField(dbFile, { dbFile = it.trim() }, label = { Text("Config file") }, placeholder = { Text("plugins/MyPlugin/config.yml") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                dbValues, { dbValues = it },
+                label = { Text("key=template, one per line") },
+                placeholder = { Text("storage.host={host}\nstorage.port={port}\nstorage.password={password}") },
+                supportingText = { Text("{host} {port} {database} {user} {password} {jdbc}. The file must exist (start the server once).") },
+                minLines = 3, maxLines = 5, modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        val binding = parseBinding(dbFile, dbValues)
         DialogButtons(confirm = "Link", enabled = name.isNotBlank() && source.isNotBlank(), onCancel = onClose) {
-            state.savePlugin(PluginLink(name, source, targets.toList(), autoDeploy, restart), onDone = onClose)
+            state.savePlugin(PluginLink(name, source, targets.toList(), autoDeploy, restart, db = binding), onDone = onClose)
         }
     }
+}
+
+private fun parseBinding(file: String, text: String): DbBinding? {
+    val values = text.lines().filter { '=' in it }.associate { it.substringBefore('=').trim() to it.substringAfter('=').trim() }
+    return if (file.isBlank() || values.isEmpty()) null else DbBinding(file, values)
 }
 
 private fun versionGlob(path: String): String {

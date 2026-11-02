@@ -116,6 +116,14 @@ class MplClient(val info: DaemonInfo) : AutoCloseable {
     suspend fun action(id: InstanceId, action: String, wait: Boolean = true): InstanceInfo =
         http.post("${path(id)}/$action") { auth(); parameter("wait", wait) }.parse()
 
+    suspend fun databaseInfo(id: InstanceId): DatabaseInfo = http.get("${path(id)}/db") { auth() }.parse()
+
+    suspend fun sql(id: InstanceId, sql: String, asRoot: Boolean = false): SqlResult = http.post("${path(id)}/sql") {
+        auth(); contentType(ContentType.Application.Json); setBody(SqlRequest(sql, asRoot))
+    }.parse()
+
+    suspend fun resetDatabase(id: InstanceId): Ok = http.post("${path(id)}/db/reset") { auth() }.parse()
+
     suspend fun command(id: InstanceId, command: String): Ok = http.post("${path(id)}/command") {
         auth(); contentType(ContentType.Application.Json); setBody(CommandRequest(command))
     }.parse()

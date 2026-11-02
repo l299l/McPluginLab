@@ -15,7 +15,7 @@ git clone https://github.com/l299l/mcpluginlab.git McPluginLab && cd McPluginLab
 Put the `bin` folder on your `PATH` or add an alias:
 
 ```bash
-alias mpl=/path/to/mpl-1.0.0/bin/mpl
+alias mpl=/path/to/mpl-1.0.1/bin/mpl
 ```
 
 `mpl desktop` adds McPluginLab with its icon to your application menu.

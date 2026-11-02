@@ -121,6 +121,7 @@ private fun InstanceLine(state: AppState, info: InstanceInfo, checked: Boolean, 
 
 private val SECTIONS = listOf(
     "Proxies" to setOf(InstanceType.Role.PROXY),
+    "Databases" to setOf(InstanceType.Role.DATABASE),
     "Servers" to setOf(InstanceType.Role.SERVER, InstanceType.Role.OTHER),
     "Bots" to setOf(InstanceType.Role.BOTS),
     "Clients" to setOf(InstanceType.Role.CLIENT),

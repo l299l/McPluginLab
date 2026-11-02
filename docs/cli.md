@@ -32,7 +32,7 @@ mpl create <project/name> [options]
 
 | Option | |
 |---|---|
-| `-t, --type` | `paper` (default), `folia`, `purpur`, `spigot`, `velocity`, `waterfall`, `bungeecord`, `soulfire`, `client` |
+| `-t, --type` | `paper` (default), `folia`, `purpur`, `spigot`, `velocity`, `waterfall`, `bungeecord`, `mariadb`, `soulfire`, `client` |
 | `-v, --version`, `--build` | Default: latest stable |
 | `-p, --port`, `-m, --memory` | Default: next free port; 2G for servers, 512M for proxies |
 | `--dir`, `--jar` | Use an existing folder and jar instead of downloading |
@@ -42,6 +42,7 @@ mpl create <project/name> [options]
 | `--target` | Bots and clients: instance to connect to |
 | `--count`, `--prefix`, `--accounts`, `--protocol` | Bots: how many, name prefix, explicit names, protocol version |
 | `--username` | Client: offline player name |
+| `--database`, `--bind-all` | MariaDB: database name (default: project name), listen on all interfaces |
 
 | Command | |
 |---|---|
@@ -50,7 +51,7 @@ mpl create <project/name> [options]
 | `mpl rm <instance> [--delete-files]` | Remove an instance |
 | `mpl start\|restart <instances...> [-w] [-e regex] [--expect-in instance] [--timeout s]` | Start; `-w` waits until ready, `-e` also waits for a log line |
 | `mpl stop\|kill <instances...>` | Stop gracefully or kill |
-| `mpl versions <software>` | Available versions of a server, proxy, `soulfire` or `minecraft` |
+| `mpl versions <software>` | Available versions of a server, proxy, `mariadb`, `soulfire` or `minecraft` |
 | `mpl java` | Java installations found or downloaded |
 
 ## Consoles and logs
@@ -63,6 +64,17 @@ mpl create <project/name> [options]
 | `mpl wait <instance> <regex> [--since cursor] [--timeout s]` | Wait for a log line |
 | `mpl attach <instance>` | Attach this terminal to the console; `Ctrl+]` detaches |
 | `mpl open <instance> [--terminal konsole]` | Open the console in a new terminal window |
+
+## Database
+
+| Command | |
+|---|---|
+| `mpl db info <instance>` | Connection details of a MariaDB instance |
+| `mpl db sql <instance> "<sql>" [--root]` | Run SQL |
+| `mpl db reset <instance>` | Drop and recreate the project database |
+| `mpl plugin bind -P <project> <plugin> -f <file> -s key={template}...` | Write the database connection into a plugin config (`--clear` removes it) |
+
+See [Databases](database.md).
 
 ## Plugins, network and files
 

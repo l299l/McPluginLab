@@ -35,6 +35,8 @@ projects you start with one click:
   out into your own terminal. They keep running when the window closes.
 - **Plugin auto-deploy.** Point a link at `target/MyPlugin-*.jar`; every build is copied to the right servers,
   old versions are removed and the servers restart.
+- **A database per project.** MariaDB starts with the network and its connection is written into your plugins'
+  configs.
 - **Bots and a real client.** SoulFire bots and a built-in offline Minecraft launcher join your network
   automatically.
 - **The right Java, automatically.** Each instance runs on the Java version it needs; missing JDKs are
@@ -70,8 +72,8 @@ projects you start with one click:
 3. Unzip it and start McPluginLab:
 
 ```bash
-unzip mpl-1.0.0.zip
-export PATH="$PWD/mpl-1.0.0/bin:$PATH"   # or add it to your shell profile
+unzip mpl-1.0.1.zip
+export PATH="$PWD/mpl-1.0.1/bin:$PATH"   # or add it to your shell profile
 mpl desktop                               # optional: add McPluginLab to your application menu
 mpl gui
 ```
@@ -120,6 +122,7 @@ that loop for you. See [AI agents](docs/ai-agents.md).
 | [Networks](docs/networks.md) | Proxies, forwarding, standalone servers |
 | [Plugins](docs/plugins.md) | Linking build output and auto-deploy |
 | [Bots and clients](docs/bots-and-clients.md) | SoulFire bots and the built-in launcher |
+| [Databases](docs/database.md) | A MariaDB per project, wired into plugin configs |
 | [AI agents](docs/ai-agents.md) | The MCP server and an example test loop |
 | [CLI reference](docs/cli.md) | Every `mpl` command |
 | [Architecture](docs/architecture.md) | Daemon, clients, files and the HTTP API |
@@ -149,6 +152,7 @@ flowchart LR
 | Purpur | Purpur API | |
 | Spigot | BuildTools | built once per version, then cached |
 | BungeeCord | md_5 Jenkins | |
+| MariaDB | system install, or archive.mariadb.org | sha256 verified |
 | SoulFire | GitHub releases | or your own SoulFireCLI jar |
 | Minecraft client | Mojang manifest | offline accounts |
 

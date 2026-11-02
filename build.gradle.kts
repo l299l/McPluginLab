@@ -10,7 +10,7 @@ plugins {
 
 subprojects {
     group = "dev.mpl"
-    version = "1.0.0"
+    version = "1.0.1"
 
     tasks.withType<Jar>().configureEach {
         manifest { attributes("Implementation-Title" to "McPluginLab", "Implementation-Version" to project.version) }

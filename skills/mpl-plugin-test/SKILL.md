@@ -34,8 +34,13 @@ running targets restart if the link says so. If the plugin has no link, ask the 
 - Single instance: `start` / `restart` with `wait_ready` (default true); add `expect` (regex) and optionally `expect_in`
   to also wait for a line, e.g. `expect: "MyPlugin v.* enabled"`, `expect_in: "demo/lobby"`.
 - Confirm the plugin loaded: `read_log` and look for its enable line; `Could not load` / `Error occurred while enabling` means fail.
-- Missing instances: `create_instance(instance="project/name", type=paper|folia|purpur|spigot|velocity|waterfall|bungeecord|soulfire|client, version?, port?)`;
+- Missing instances: `create_instance(instance="project/name", type=paper|folia|purpur|spigot|velocity|waterfall|bungeecord|mariadb|soulfire|client, version?, port?)`;
   bots need `bot_target` (name of proxy/server), `bot_count`, `bot_prefix`.
+
+- Plugin needs a database: `create_instance(instance="project/db", type=mariadb)` (once per project), start it, start the
+  server once so the plugin writes its config, then `bind_plugin_database(project, plugin, file="plugins/X/config.yml",
+  values="storage.host={host}\nstorage.port={port}\n...")` and restart the server. Templates: `{host} {port} {database} {user} {password} {jdbc}`.
+  Assert on stored data with `db_query(instance, sql)`; `db_reset` gives the next test a clean database.
 
 ## 6. Exercise
 - Console: `send_command(instance, command)` (no leading slash).

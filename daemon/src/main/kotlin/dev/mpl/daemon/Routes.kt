@@ -12,6 +12,8 @@ import dev.mpl.api.LogPage
 import dev.mpl.api.MplJson
 import dev.mpl.api.Ok
 import dev.mpl.api.PluginLink
+import dev.mpl.api.SqlRequest
+import dev.mpl.api.SqlResult
 import dev.mpl.api.TerminalSize
 import dev.mpl.api.UpdateInstanceRequest
 import dev.mpl.api.UpdateProjectRequest
@@ -143,6 +145,16 @@ private fun Route.instanceRoutes(lab: Lab) {
     post("/stop") { call.respond(if (call.waits) lab.stop(call.instanceId) else lab.requestStop(call.instanceId)) }
     post("/restart") { call.respond(if (call.waits) lab.restart(call.instanceId) else lab.requestRestart(call.instanceId)) }
     post("/kill") { call.respond(lab.kill(call.instanceId)) }
+
+    get("/db") { call.respond(lab.databaseInfo(call.instanceId)) }
+    post("/sql") {
+        val request = call.receive<SqlRequest>()
+        call.respond(SqlResult(lab.sql(call.instanceId, request.sql, request.asRoot)))
+    }
+    post("/db/reset") {
+        lab.resetDatabase(call.instanceId)
+        call.respond(Ok())
+    }
     post("/command") {
         lab.sendCommand(call.instanceId, call.receive<CommandRequest>().command)
         call.respond(Ok())

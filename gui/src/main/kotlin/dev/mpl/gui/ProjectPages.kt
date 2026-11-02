@@ -61,6 +61,7 @@ private fun PluginCard(state: AppState, status: PluginStatus) {
         Spacer(Modifier.size(8.dp))
         Detail("Targets", link.targets.ifEmpty { listOf("all servers") }.joinToString())
         Detail("Mode", listOfNotNull(if (link.autoDeploy) "auto deploy" else "manual", if (link.restart) "restart running servers" else null).joinToString(", "))
+        link.db?.let { Detail("Database", "${it.file} (${it.values.size} keys)") }
         Detail("Current jar", status.jar?.substringAfterLast('/') ?: "no jar matches yet")
         status.deployedAt?.let { Detail("Last deploy", "${status.deployedJar} at ${DateFormat.getTimeInstance().format(Date(it))}") }
         status.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }

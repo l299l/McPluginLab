@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.mpl.api.CreateInstanceRequest
 import dev.mpl.api.CreateProjectRequest
+import dev.mpl.api.DatabaseInfo
 import dev.mpl.api.DaemonConnection
 import dev.mpl.api.FileEntry
 import dev.mpl.api.InstanceId
@@ -93,6 +94,12 @@ class AppState(initialClient: MplClient, private val scope: CoroutineScope) {
     fun setOnlineMode(project: String, online: Boolean) = launchFor(project) { client.updateProject(project, UpdateProjectRequest(online)) }
 
     fun syncNetwork(project: String) = launchFor("network:$project") { client.syncNetwork(project) }
+
+    suspend fun databaseInfo(id: InstanceId): DatabaseInfo = client.databaseInfo(id)
+
+    suspend fun sql(id: InstanceId, sql: String): String = client.sql(id, sql).output
+
+    fun resetDatabase(id: InstanceId) = launchFor("db:$id") { client.resetDatabase(id) }
 
     suspend fun files(id: InstanceId, path: String): List<FileEntry> = client.files(id, path)
 

@@ -12,27 +12,30 @@ enum class InstanceType(val software: String?, val role: Role) {
     @SerialName("velocity") VELOCITY("velocity", Role.PROXY),
     @SerialName("waterfall") WATERFALL("waterfall", Role.PROXY),
     @SerialName("bungeecord") BUNGEECORD("bungeecord", Role.PROXY),
+    @SerialName("mariadb") MARIADB("mariadb", Role.DATABASE),
     @SerialName("soulfire") SOULFIRE("soulfire", Role.BOTS),
     @SerialName("client") CLIENT("minecraft", Role.CLIENT),
     @SerialName("custom") CUSTOM(null, Role.OTHER);
 
-    enum class Role { SERVER, PROXY, BOTS, CLIENT, OTHER }
+    enum class Role { SERVER, PROXY, DATABASE, BOTS, CLIENT, OTHER }
 
     val isServer: Boolean get() = role == Role.SERVER
     val isProxy: Boolean get() = role == Role.PROXY
+    val isDatabase: Boolean get() = role == Role.DATABASE
     val isPaperBased: Boolean get() = this == PAPER || this == FOLIA || this == PURPUR
     val isPlayer: Boolean get() = role == Role.BOTS || role == Role.CLIENT
 
     val defaultStopCommand: String
         get() = when (role) {
             Role.PROXY -> "end"
-            Role.BOTS, Role.CLIENT -> ""
+            Role.DATABASE, Role.BOTS, Role.CLIENT -> ""
             else -> "stop"
         }
 
     val defaultReadyPattern: String
         get() = when (this) {
             WATERFALL, BUNGEECORD -> """Listening on /"""
+            MARIADB -> """ready for connections"""
             SOULFIRE -> """Loaded \d+ accounts"""
             CLIENT -> """Setting user: """
             else -> """Done \([0-9.,]+s\)!"""
@@ -67,7 +70,43 @@ data class PluginLink(
     val targets: List<String> = emptyList(),
     val autoDeploy: Boolean = true,
     val restart: Boolean = true,
+    val db: DbBinding? = null,
 )
+
+/**
+ * Writes the project database's connection details into a plugin's config file on every network sync.
+ * [values] maps a config key (YAML path like `storage.host`, or a properties/TOML key) to a template using
+ * `{host}`, `{port}`, `{database}`, `{user}`, `{password}` and `{jdbc}`. [file] is relative to the server folder.
+ */
+@Serializable
+data class DbBinding(
+    val file: String,
+    val values: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class DatabaseSettings(
+    val database: String,
+    val user: String = "mpl",
+    val password: String,
+    val bindAll: Boolean = false,
+) {
+    fun jdbc(host: String, port: Int) = "jdbc:mariadb://$host:$port/$database"
+}
+
+@Serializable
+data class DatabaseInfo(
+    val host: String,
+    val port: Int,
+    val database: String,
+    val user: String,
+    val password: String,
+    val jdbc: String,
+    val bindAll: Boolean = false,
+)
+
+@Serializable data class SqlRequest(val sql: String, val asRoot: Boolean = false)
+@Serializable data class SqlResult(val output: String)
 
 @Serializable
 data class PluginStatus(
@@ -129,6 +168,7 @@ data class InstanceDef(
     val bots: BotSettings? = null,
     val client: ClientSettings? = null,
     val proxied: Boolean = true,
+    val database: DatabaseSettings? = null,
 ) {
     val id: InstanceId get() = InstanceId(project, name)
     val effectiveStopCommand: String get() = stopCommand ?: type.defaultStopCommand
@@ -185,6 +225,8 @@ data class CreateInstanceRequest(
     val bots: BotSettings? = null,
     val client: ClientSettings? = null,
     val proxied: Boolean = true,
+    val databaseName: String? = null,
+    val bindAll: Boolean = false,
 )
 
 @Serializable data class CommandRequest(val command: String)

@@ -13,6 +13,8 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.required
+import dev.mpl.api.DbBinding
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.boolean
 import com.github.ajalt.clikt.parameters.types.enum
@@ -206,6 +208,43 @@ class PluginRemove : ClientCommand("rm", "Remove a plugin link") {
     }
 }
 
+class PluginBind : ClientCommand("bind", "Write the project database's connection into a plugin's config on every start/sync") {
+    private val name by argument(help = "Plugin link name")
+    private val file by option("-f", "--file", help = "Config file relative to the server folder, e.g. plugins/Shop/config.yml").required()
+    private val values by option("-s", "--set", help = "key=template, e.g. storage.host={host}; templates: {host} {port} {database} {user} {password} {jdbc}").multiple(required = true)
+    private val clear by option("--clear", help = "Remove the binding").flag()
+
+    override suspend fun execute(client: MplClient) {
+        val link = client.plugins(project).firstOrNull { it.link.name == name }?.link ?: throw MplException("No plugin link '$name' in $project")
+        val binding = if (clear) null else DbBinding(file, values.associate { it.substringBefore('=') to it.substringAfter('=', "") })
+        client.savePlugin(project, link.copy(db = binding))
+        echo(if (clear) "Removed database binding of $name" else "Bound $name to the database (${binding!!.values.size} keys in ${binding.file})")
+    }
+}
+
+class DbInfo : ClientCommand("info", "Show host, port, database, user, password and JDBC URL") {
+    private val name by argument(help = "[project/]name of the database instance")
+    override suspend fun execute(client: MplClient) {
+        val i = client.databaseInfo(ref(name))
+        echo("host:     ${i.host}\nport:     ${i.port}\ndatabase: ${i.database}\nuser:     ${i.user}\npassword: ${i.password}\njdbc:     ${i.jdbc}")
+    }
+}
+
+class DbSql : ClientCommand("sql", "Run SQL against the project database (tab separated output)") {
+    private val name by argument(help = "[project/]name of the database instance")
+    private val sql by argument(help = "SQL to run")
+    private val root by option("--root", help = "Run as root, not as the project user").flag()
+    override suspend fun execute(client: MplClient) = echo(client.sql(ref(name), sql, root).output.trimEnd())
+}
+
+class DbReset : ClientCommand("reset", "Drop and recreate the project database") {
+    private val name by argument(help = "[project/]name of the database instance")
+    override suspend fun execute(client: MplClient) {
+        client.resetDatabase(ref(name))
+        echo("Database of ${ref(name)} was reset")
+    }
+}
+
 class Deploy : ClientCommand("deploy", "Deploy linked plugins of a project now") {
     private val plugin by argument().optional()
     override suspend fun execute(client: MplClient) {
@@ -261,7 +300,7 @@ class Versions : ClientCommand("versions", "List versions of paper, folia, purpu
     override suspend fun execute(client: MplClient) = echo(client.versions(software).versions.joinToString("\n"))
 }
 
-class Create : ClientCommand("create", "Create an instance, downloading the server jar (accepts the Minecraft EULA)") {
+class Create : ClientCommand("create", "Create an instance, downloading the server jar (accepts the Minecraft EULA); --type mariadb adds a project database") {
     private val name by argument(help = "[project/]name")
     private val type by option("-t", "--type").enum<InstanceType> { it.name.lowercase() }.default(InstanceType.PAPER)
     private val version by option("-v", "--version", help = "Defaults to the latest stable version")
@@ -279,6 +318,8 @@ class Create : ClientCommand("create", "Create an instance, downloading the serv
     private val prefix by option("--prefix", help = "Bots: name prefix").default("Bot")
     private val accounts by option("--accounts", help = "Bots: comma separated names instead of prefix+count")
     private val protocol by option("--protocol", help = "Bots: protocol version (default: target server version)")
+    private val database by option("--database", help = "MariaDB: database name (default: the project name)")
+    private val bindAll by option("--bind-all", help = "MariaDB: listen on all interfaces so other machines can connect").flag()
 
     override suspend fun execute(client: MplClient) {
         val id = ref(name)
@@ -288,6 +329,7 @@ class Create : ClientCommand("create", "Create an instance, downloading the serv
         val request = CreateInstanceRequest(
             project = id.project, name = id.name, type = type, version = version, build = build, dir = dir,
             port = port, memory = memory, java = java, jar = jar, acceptEula = true, offlineMode = !online, bots = bots, client = player, proxied = !standalone,
+            databaseName = database, bindAll = bindAll,
         )
         val info = client.create(request)
         echo("Created ${info.describe()} in ${info.def.dir}")
@@ -445,8 +487,9 @@ fun main(args: Array<String>) {
         Mpl().subcommands(
             DaemonCommand(), Shutdown(), Gui(), DesktopEntry(), Mcp(),
             GroupCommand("project", "Manage projects").subcommands(ProjectList(), ProjectCreate(), ProjectRemove(), ProjectSet()),
-            GroupCommand("plugin", "Manage plugin links (use -P project)").subcommands(PluginList(), PluginAdd(), PluginRemove()),
+            GroupCommand("plugin", "Manage plugin links (use -P project)").subcommands(PluginList(), PluginAdd(), PluginBind(), PluginRemove()),
             Deploy(),
+            GroupCommand("db", "Project database (create one with: mpl create <project>/db --type mariadb)").subcommands(DbInfo(), DbSql(), DbReset()),
             GroupCommand("network", "Proxy network configuration (use -P project)").subcommands(NetworkSync()),
             GroupCommand("file", "Read and write instance files").subcommands(FileList(), FileRead(), FileWrite()),
             ListInstances(), Versions(), JavaList(), Create(), Remove(), SetInstance(), Up(), Down(),

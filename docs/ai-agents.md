@@ -19,7 +19,7 @@ daemon restarts.
 | Tool | Purpose |
 |---|---|
 | `list_projects`, `list_instances` | What exists, states, ports and log cursors |
-| `create_instance` | Servers, proxies, bots and clients |
+| `create_instance` | Servers, proxies, MariaDB, bots and clients |
 | `start_project`, `stop_project` | A whole project or some of its instances, in the right order |
 | `start`, `restart` | One instance; waits until ready, optionally until a log line (`expect`, `expect_in`) |
 | `stop`, `kill` | Stop gracefully or immediately |
@@ -28,6 +28,7 @@ daemon restarts.
 | `read_log` | Recent lines, or only the lines after a cursor |
 | `wait_for_log` | Wait for a regex in a log |
 | `list_plugins`, `deploy_plugins` | Plugin links and deploying the latest build |
+| `db_info`, `db_query`, `db_reset`, `bind_plugin_database` | Project database: connection, SQL, clean slate, plugin config binding (see [Databases](database.md)) |
 | `sync_network`, `set_proxied` | Network configuration and standalone servers |
 | `list_files`, `read_file`, `write_file` | Server folders and configs |
 
