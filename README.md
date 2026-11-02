@@ -109,7 +109,8 @@ claude mcp add mpl -- /path/to/McPluginLab/cli/build/install/mpl/bin/mpl mcp
 
 The agent gets tools such as `start_project`, `deploy_plugins`, `send_command` and `bot_command` with `expect`,
 `wait_for_log` and `read_log` with cursors, so it can run a full test loop: build, deploy, join with bots,
-trigger the feature and check the server log. See [AI agents](docs/ai-agents.md).
+trigger the feature and check the server log. A ready-made Claude Code skill (`skills/mpl-plugin-test`) drives
+that loop for you. See [AI agents](docs/ai-agents.md).
 
 ## Documentation
 

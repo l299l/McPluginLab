@@ -43,6 +43,17 @@ daemon restarts.
 Every waiting tool records the log position before it acts, so an agent never misses a line that appears
 immediately, and it never matches stale lines from before.
 
+## Claude Code skill
+
+`skills/mpl-plugin-test` teaches Claude Code the loop above (build, deploy, start, bots, log assertions) and the
+safety rules for a running setup. Install it once:
+
+```bash
+ln -s /path/to/McPluginLab/skills/mpl-plugin-test ~/.claude/skills/mpl-plugin-test
+```
+
+Then ask "test my plugin" or run `/mpl-plugin-test`.
+
 ## Prompt ideas
 
 - "Start the demo project and check that all bots reach the lobby."
