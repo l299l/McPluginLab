@@ -116,7 +116,7 @@ that loop for you. See [AI agents](docs/ai-agents.md).
 
 ## Documentation
 
-| | |
+| Guide | Covers |
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, first project, a tour of the GUI |
 | [Networks](docs/networks.md) | Proxies, forwarding, standalone servers |
@@ -152,7 +152,7 @@ flowchart LR
 | Purpur | Purpur API | |
 | Spigot | BuildTools | built once per version, then cached |
 | BungeeCord | md_5 Jenkins | |
-| MariaDB | system install, or archive.mariadb.org | sha256 verified |
+| MariaDB | your installed `mariadbd`, else archive.mariadb.org | downloaded builds sha256 verified |
 | SoulFire | GitHub releases | or your own SoulFireCLI jar |
 | Minecraft client | Mojang manifest | offline accounts |
 
