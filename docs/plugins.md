@@ -32,7 +32,9 @@ Without `-t`, a link targets every server in the project.
 
 - **Automatically**: the source is checked every two seconds. Once a new jar has stopped changing, it is copied
   into each target's `plugins/` folder, older versions of the same plugin are removed and running targets
-  restart. Use `--manual` to turn this off and `--no-restart` to only copy.
+  restart. A jar counts as an older version when its `plugin.yml` (or `paper-plugin.yml`, `velocity-plugin.json`,
+  `bungee.yml`) has the same plugin name, or when it is the jar this link deployed last (recorded in
+  `plugins/.mpl-deployed.properties`). Other jars are never touched. Use `--manual` to turn this off and `--no-restart` to only copy.
 - **Now**: **Deploy now** / **Deploy all** in the GUI, `mpl deploy -P demo [MyPlugin]`, or the
   `deploy_plugins` MCP tool.
 

@@ -10,12 +10,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.Path
-import kotlin.io.path.copyTo
-import kotlin.io.path.createDirectories
-import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
@@ -55,7 +51,7 @@ class PluginService(private val lab: Lab, private val scope: CoroutineScope) {
             val jar = resolve(link.source) ?: throw IllegalArgumentException("No jar matches ${link.source}")
             val targets = targets(project, link)
             require(targets.isNotEmpty()) { "Plugin ${link.name} has no target servers" }
-            targets.forEach { install(jar, link.source, it) }
+            targets.forEach { PluginInstaller.install(jar, link.name, Path(it.dir).resolve("plugins")) }
             targets.filter { link.restart && lab.isAlive(it.id) }.forEach { lab.requestRestart(it.id) }
             targets.forEach { lab.note(it.id, "deployed ${jar.name}") }
             PluginStatus(link, jar.toString(), jar.name, System.currentTimeMillis())
@@ -81,13 +77,6 @@ class PluginService(private val lab: Lab, private val scope: CoroutineScope) {
     private fun isDeployed(jar: Signature, targets: List<InstanceDef>) = targets.all { target ->
         val installed = Path(target.dir).resolve("plugins").resolve(jar.path.name)
         installed.exists() && installed.fileSize() == jar.size && installed.getLastModifiedTime().toMillis() == jar.modified
-    }
-
-    private fun install(jar: Path, source: String, target: InstanceDef) {
-        val plugins = Path(target.dir).resolve("plugins").createDirectories()
-        val pattern = globRegex(Path(source).name.takeIf { it.endsWith(".jar") } ?: jar.name)
-        plugins.listDirectoryEntries("*.jar").filter { it.name != jar.name && pattern.matches(it.name) }.forEach { it.deleteIfExists() }
-        jar.copyTo(plugins.resolve(jar.name), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES)
     }
 
     companion object {

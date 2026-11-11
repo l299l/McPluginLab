@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deploying a plugin no longer deletes other plugins with a similar file name.** A link such as `MyPlugin-*.jar`
+  used to remove every jar in `plugins/` matching that pattern, for example a hand-copied `MyPlugin-Addon-1.0.jar`.
+  Now only older versions of the same plugin (same name in `plugin.yml`, `paper-plugin.yml`, `velocity-plugin.json`
+  or `bungee.yml`) and the jar the link itself deployed last are replaced.
+
 ## [1.0.1] - 2026-11-02
 
 Databases: a project can now have its own MariaDB, started with the network and wired into plugin configs.
